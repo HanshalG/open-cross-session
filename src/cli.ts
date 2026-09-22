@@ -64,6 +64,7 @@ import {
   resolveDmTarget,
   resolveSelfName,
   selfIdentity,
+  claudeSessionIdentity,
   selfNameOwner,
   shadowFreeWorkspaceAlias,
   CODEX_THREAD_ID_ENV,
@@ -105,7 +106,7 @@ import {
   upgradeCheckEnabled,
 } from "./upgrade.ts";
 
-export const OCS_VERSION = "0.5.0";
+export const OCS_VERSION = "0.5.1";
 
 const LANG = detectLang();
 const M = messages(LANG);
@@ -177,6 +178,7 @@ function currentInboxIdentity(parsed: Parsed, primaryName: string): InboxIdentit
     const sessions = listNativeSessions();
     const session = selfPid === null ? undefined : sessions.find((candidate) => candidate.pid === selfPid);
     if (session?.name === primaryName) {
+      identities.add(claudeSessionIdentity(session));
       const alias = shadowFreeWorkspaceAlias(session, sessions, names);
       if (alias !== null) mentionNames.add(alias);
       try {
@@ -519,6 +521,12 @@ async function cmdSend(parsed: Parsed): Promise<void> {
   }
 
   const wakeNames = [...claudeNames];
+  if (wakeNames.length === 0 && codexTargets.length === 0 && piTargets.length === 0) {
+    // #36：一个人都没叫醒时必须明说，不能只留一行 stored 让发送方以为送到了。
+    const dm = channel.startsWith("dm-");
+    console.log(M.sendNoWakeTarget(dm));
+    if (dm) markStoredDeliveryFailure("failed");
+  }
   if (wakeNames.length === 0) {
     if (idleSubscriber !== null) subscribeIdle(idleSubscriber, []);
     return;
@@ -618,7 +626,11 @@ async function cmdDm(parsed: Parsed): Promise<void> {
   }
   const senderConversationIdentity = autoNativeSender ? senderWorkspaceIdentity : selfIdentity(from);
   const targetConversationIdentity = resolved.workspaceIdentity ?? null;
-  const messageFromIdentity = senderConversationIdentity ?? selfIdentity(from);
+  // #36：会话级兜底按 sessionId 派生，重启改名后同一对会话仍落在同一频道、route 不断。
+  const senderSessionIdentity = autoNativeSender && nativeSelf !== undefined
+    ? claudeSessionIdentity(nativeSelf)
+    : selfIdentity(from);
+  const messageFromIdentity = senderConversationIdentity ?? senderSessionIdentity;
   const messageToIdentity = targetConversationIdentity ?? resolved.identity;
   const stableChannel = senderConversationIdentity !== null && targetConversationIdentity !== null
     ? dmChannel(senderConversationIdentity, targetConversationIdentity)
@@ -626,7 +638,7 @@ async function cmdDm(parsed: Parsed): Promise<void> {
 
   // 无稳定 pair 时保留旧的反向 dm 收敛；有稳定 pair 时不再猜旧频道，
   // 历史只能由用户通过 --inherit 明确绑定。
-  let fallbackChannel = dmChannel(selfIdentity(from), resolved.identity);
+  let fallbackChannel = dmChannel(senderSessionIdentity, resolved.identity);
   if (stableChannel === undefined) {
     try {
       statSync(channelLogPath(fallbackChannel));
@@ -1277,6 +1289,8 @@ ocs whoami [--json] | sessions | watch <channel> | doctor [--fix] | version
   log commit succeeded. Requested wakes report accepted, stored-only, or unknown
   separately. Exit 2 means stored but wake failed; exit 3 means stored with an
   unknown outcome. Never resend either result; inspect the printed channel/seq.
+  A send that wakes nobody (no @mention, no --reply-to) says stored-only; in a
+  dm-* channel that exits 2 too. A DM does not auto-wake the peer on plain send.
 - Codex delivery ladder depends on the host: a Desktop-hosted task goes through
   Desktop IPC first (it keeps the native cross-task provenance envelope; a queued
   message is recorded as a plain user message instead), while a terminal TUI goes

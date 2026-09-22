@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.1
+
+- 会话级 DM（同一工作目录多会话、workspace continuity 退回时）改按 Claude sessionId 派生频道和 route 身份（`claude:<uuid>`），重启/自动改名后同一对会话仍在同一频道；此前按会话名，改名后老频道静默失联（#36）
+- `ocs send` 一个人都没唤醒时明说 stored-only；在 `dm-*` 频道里退出码 2（#36）
+- `@` 点名的边界放宽：前一个字符不是地址/邮箱字符就算，`。@x`、`，@x` 等中文写法不再被吞（#36）
+
 ## 0.4.3
 
 - `ocs upgrade` 真的升级二进制：查 GitHub 最新 Release，落后时复用 install.sh（sha256 校验 + 冒烟 + 原子替换）；`--check` 只报告；原来的托管版迁移指南移到 `--party`。此前该命令只打印迁移文案，装了旧版的用户无从得知有新版

@@ -410,3 +410,14 @@ test("codex-<8hex> 短地址解析到唯一的本地 thread id", () => {
     threadId: THREAD,
   });
 });
+
+describe("claudeSessionIdentity（#36）", () => {
+  test("有 hex sessionId 按 id（改名不变），否则退回名字", () => {
+    const { claudeSessionIdentity } = require("../src/roster.ts") as typeof import("../src/roster.ts");
+    const a = claudeSessionIdentity({ name: "A-2b", sessionId: "AE38E21B-1111-2222-3333-444455556666" });
+    const b = claudeSessionIdentity({ name: "A-9f", sessionId: "ae38e21b-1111-2222-3333-444455556666" });
+    expect(a).toBe("claude:ae38e21b-1111-2222-3333-444455556666");
+    expect(b).toBe(a);
+    expect(claudeSessionIdentity({ name: "solo", sessionId: null })).toBe("name:solo");
+  });
+});

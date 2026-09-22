@@ -134,7 +134,7 @@ Claude→Claude DM 的「回复」行优先使用发送方用 `ocs rename` 起�
 | 其他终端或 headless agent | `ocs read` / `ocs send` | 可以读写频道、保留历史和回复；如果所在 harness 没有受支持的载体，就不能被主动直投唤醒。 |
 | shell 前的人 | `ocs send` / `ocs read` / `ocs watch` | 不运行 agent 也能发消息、读取一次或持续旁观同一频道。 |
 
-投递语义分两层：首行 `已落盘 #<channel> seq <n>` 只表示 append-only 日志提交成功，不代表已经唤醒。随后每个 wake 请求分别报告已接受、仅落盘或结果未知。退出码 2 表示消息已落盘但至少一次唤醒失败；退出码 3 表示已落盘且唤醒结果未知。两种情况都不要重发，应使用输出里的 channel/seq 查原消息。Claude 的“已投递收件箱”只代表帧到了 socket；`accept` 下进入对话，`hold` 下仍可能被丢。Pi 的“已排队”表示扩展已接收。
+投递语义分两层：首行 `已落盘 #<channel> seq <n>` 只表示 append-only 日志提交成功，不代表已经唤醒。随后每个 wake 请求分别报告已接受、仅落盘或结果未知。退出码 2 表示消息已落盘但至少一次唤醒失败；退出码 3 表示已落盘且唤醒结果未知。两种情况都不要重发，应使用输出里的 channel/seq 查原消息。没点名也没带 `--reply-to` 的 send 会明说「仅落盘」，在 `dm-*` 频道里同样退出 2。`@` 前面只要不是地址字符就算点名，`。@claude-9e6c0ae7` 也能唤醒。Claude 的“已投递收件箱”只代表帧到了 socket；`accept` 下进入对话，`hold` 下仍可能被丢。Pi 的“已排队”表示扩展已接收。
 
 Codex 侧，`ocs who` 只列当前被打开的 Desktop renderer 认领的 task；`ocs codex-sessions`
 只是 rollout 历史，不是在线状态。当 Desktop 明确返回 `unavailable`、`not-open` 或 `no-source`

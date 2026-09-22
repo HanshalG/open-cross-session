@@ -255,6 +255,38 @@ describe("inbox 离线续接", () => {
   }, T);
 });
 
+describe("#36：没叫醒任何人要明说；全角标点后的 @ 照样唤醒", () => {
+  test("dm 频道无点名：stored-only 提示且退出码 2；普通频道只提示不改退出码", async () => {
+    const f = fixture();
+    try {
+      const dm = await run(f, ["send", "dm-abc", "plain reply", "--as", "tester"]);
+      expect(dm.code).toBe(2);
+      expect(dm.stdout).toContain("wake: stored-only — no @mention or --reply-to, nobody was woken");
+      const chat = await run(f, ["send", "chat", "plain note", "--as", "tester"]);
+      expect(chat.code).toBe(0);
+      expect(chat.stdout).toContain("nobody was woken");
+      const quiet = await run(f, ["send", "chat", "quiet", "--as", "tester", "--no-wake"]);
+      expect(quiet.stdout).not.toContain("nobody was woken");
+      await sleep(200);
+      expect(f.frames.length).toBe(0);
+    } finally {
+      f.close();
+    }
+  }, T);
+
+  test("`。@worker-a` 唤醒 worker-a", async () => {
+    const f = fixture();
+    try {
+      const r = await run(f, ["send", "chat", "麻烦看一下。@worker-a", "--as", "tester"]);
+      expect(r.code).toBe(0);
+      expect(r.stdout).toContain("wake: delivered to inbox → worker-a");
+      await f.nextFrame();
+    } finally {
+      f.close();
+    }
+  }, T);
+});
+
 describe("唤醒目标排除发送者本人（#3）", () => {
   test("按名字：--as worker-a 的正文里 @worker-a 不唤醒 worker-a（活会话、真 socket）", async () => {
     const f = fixture();

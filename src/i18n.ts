@@ -16,6 +16,7 @@ interface Catalog {
   help: string;
   stored: (channel: string, seq: number) => string;
   wakeNoMatch: (names: string) => string;
+  sendNoWakeTarget: (dm: boolean) => string;
   wakeSelfSkipped: string;
   wakeDelivered: (target: string) => string;
   wakeFailed: (target: string, reason: string) => string;
@@ -228,6 +229,8 @@ Usage:
 Data directory: ~/.ocs (override with OCS_HOME). Language: OCS_LANG=en|zh.`,
   stored: (channel, seq) => `stored #${channel} seq ${seq}`,
   wakeNoMatch: (names) => `wake: no live Claude session matches @${names}`,
+  sendNoWakeTarget: (dm) =>
+    `wake: stored-only — no @mention or --reply-to, nobody was woken${dm ? " (DM channels do not auto-wake the peer)" : ""}. Do not resend; add @<address> (e.g. claude-<8hex> from \`ocs who\`) or --reply-to <seq> next time.`,
   wakeSelfSkipped: " (you mentioned yourself; skipped)",
   wakeDelivered: (target) => `wake: delivered to inbox → ${target}`,
   wakeFailed: (target, reason) =>
@@ -504,6 +507,8 @@ const zh: Catalog = {
 数据目录: ~/.ocs（OCS_HOME 可覆盖）。语言: OCS_LANG=en|zh。`,
   stored: (channel, seq) => `已落盘 #${channel} seq ${seq}`,
   wakeNoMatch: (names) => `wake: 没有匹配 @${names} 的活 Claude 会话`,
+  sendNoWakeTarget: (dm) =>
+    `wake: 仅落盘——正文没有 @点名、也没带 --reply-to，没有唤醒任何人${dm ? "（DM 频道不会自动叫醒对端）" : ""}。别重发；下次加 @<地址>（如 \`ocs who\` 里的 claude-<8hex>）或 --reply-to <seq>。`,
   wakeSelfSkipped: "（@ 到了自己，已跳过）",
   wakeDelivered: (target) => `wake: 已投递收件箱 → ${target}`,
   wakeFailed: (target, reason) => `wake: 仅落盘 → ${target}: ${reason}（消息已经落盘，请勿重发）`,

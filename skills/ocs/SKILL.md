@@ -71,6 +71,8 @@ ocs whoami [--json] | sessions | watch <channel> | doctor [--fix] | version
   log commit succeeded. Requested wakes report accepted, stored-only, or unknown
   separately. Exit 2 means stored but wake failed; exit 3 means stored with an
   unknown outcome. Never resend either result; inspect the printed channel/seq.
+  A send that wakes nobody (no @mention, no --reply-to) says stored-only; in a
+  dm-* channel that exits 2 too. A DM does not auto-wake the peer on plain send.
 - Codex delivery ladder depends on the host: a Desktop-hosted task goes through
   Desktop IPC first (it keeps the native cross-task provenance envelope; a queued
   message is recorded as a plain user message instead), while a terminal TUI goes

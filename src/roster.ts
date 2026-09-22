@@ -428,6 +428,16 @@ export interface ResolvedDmTarget {
   cmuxRef?: string;
 }
 
+/**
+ * Claude 会话的会话级 DM 身份（#36）：有 hex sessionId 就按它（跨重启/改名不变，
+ * cmux restore 也保留），否则才退回会随自动名字变化的 `name:<名字>`。
+ */
+export function claudeSessionIdentity(session: Pick<NativeClaudeSession, "name" | "sessionId">): string {
+  const id = session.sessionId;
+  if (id !== null && /^[0-9a-f]{8}/i.test(id)) return `claude:${id.toLowerCase()}`;
+  return `name:${session.name!}`;
+}
+
 /** 发送方的注入式身份串（与 ResolvedDmTarget.identity 同一命名空间规则）。 */
 export function selfIdentity(from: string): string {
   const piSessionId = piSessionIdFromTarget(from);
@@ -491,7 +501,7 @@ function claudeTarget(
   return {
     kind: "claude",
     name: session.name!,
-    identity: `name:${session.name!}`,
+    identity: claudeSessionIdentity(session),
     claude: session,
     ...(workspaceAlias === null ? {} : { workspaceAlias }),
     ...(workspace.identity === null ? {} : { workspaceIdentity: workspace.identity }),
@@ -509,7 +519,12 @@ function resolveNamedTarget(
   if (named.kind === "pi") return { ...resolveDmTarget(piTargetName(named.id), env)!, via: "ocs-name" };
   const live = sessions.find((candidate) => claudeEntryMatches(named, candidate));
   if (live !== undefined) return { ...claudeTarget(live, sessions, env), via: "ocs-name" };
-  return { kind: "claude", name: named.name, identity: `name:${named.name}`, via: "ocs-name" };
+  return {
+    kind: "claude",
+    name: named.name,
+    identity: /^[0-9a-f]{8}/i.test(named.id) ? `claude:${named.id.toLowerCase()}` : `name:${named.name}`,
+    via: "ocs-name",
+  };
 }
 
 /**
@@ -705,7 +720,7 @@ export function resolveDmTarget(
     return {
       kind: "claude",
       name: matched.name!,
-      identity: `name:${matched.name!}`,
+      identity: claudeSessionIdentity(matched),
       claude: matched,
       workspaceAlias: alias,
       ...(workspace.identity === null ? {} : { workspaceIdentity: workspace.identity }),

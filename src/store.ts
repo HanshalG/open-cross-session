@@ -160,7 +160,9 @@ export function extractMentions(body: string): string[] {
   const out = new Set<string>();
   for (const match of body.matchAll(/@([A-Za-z0-9][A-Za-z0-9._-]{0,63})/g)) {
     const at = match.index ?? 0;
-    if (at > 0 && !/[\s([{（]/u.test(body[at - 1]!)) continue;
+    // #36：边界按「前一个字符不是地址/邮箱字符」判，`。@x`、`：@x` 这类中文写法照样算点名；
+    // 只排除 `a@b`、`x.@y` 这种邮箱/路径形态。
+    if (at > 0 && /[A-Za-z0-9_.+\-@/]/.test(body[at - 1]!)) continue;
     out.add(match[1]!);
   }
   return [...out];

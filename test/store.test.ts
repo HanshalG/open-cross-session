@@ -306,6 +306,13 @@ describe("extractMentions", () => {
       .toEqual(["bob", "al.ice-1"]);
     expect(extractMentions("no mentions")).toEqual([]);
   });
+
+  test("#36：全角标点 / CJK 后面紧跟的 @ 也算点名", () => {
+    expect(extractMentions("麻烦看一下。@claude-9e6c0ae7")).toEqual(["claude-9e6c0ae7"]);
+    expect(extractMentions("好的，@a！@b？@c；@d：@e、@f」@g）@h 请看@i"))
+      .toEqual(["a", "b", "c", "d", "e", "f", "g", "h", "i"]);
+    expect(extractMentions("x.@y a+@b path/@c")).toEqual([]);
+  });
 });
 
 describe("seq 单一真值源 = 日志（review 修复回归）", () => {
