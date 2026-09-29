@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.1
+
+- macOS 防火墙开着时 `ocs lan up` 自动放行 ocs 自己：此前换到正式安装路径或升级后，局域网连接被静默拦截，对端只看到「连不上」、本机日志一行都没有（Mac ↔ Windows 真机发现）
+
 ## 0.6.0
 
 - 局域网模式（默认关闭）：`ocs lan up` 启动守护进程，`ocs lan pair` 出一次性配对码、另一台 `ocs lan pair <码>` 兑现；之后 `ocs dm <地址>@<对端>` 跨机发消息并唤醒、`ocs who --lan` 看远端 agent。Ed25519 身份 + 签名 X25519 握手 + AES-256-GCM，未配对机器只能兑现有效配对码；协议与威胁模型见 docs/lan.md

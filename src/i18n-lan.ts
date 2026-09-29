@@ -10,6 +10,7 @@ export interface LanCatalog {
   upAlready: (pid: number, port: number) => string;
   upFailed: (detail: string) => string;
   upFirewallHint: string;
+  upFirewallAllowed: string;
   downDone: (pid: number) => string;
   downNotRunning: string;
   downNotOurs: (pid: number) => string;
@@ -72,7 +73,8 @@ const en: LanCatalog = {
     `lan: daemon up as ${name} on port ${port} (key ${fp})${discover ? "" : " — discovery off"}`,
   upAlready: (pid, port) => `lan: daemon already running (pid ${pid}, port ${port}); \`ocs lan down\` first to change settings`,
   upFailed: (detail) => `lan: daemon did not start: ${detail}`,
-  upFirewallHint: "  macOS may ask once whether ocs may accept incoming connections — allow it, or peers cannot reach you.",
+  upFirewallHint: "  could not register ocs with the macOS firewall — allow incoming connections for ocs in System Settings › Network › Firewall, or peers cannot reach you.",
+  upFirewallAllowed: "  macOS firewall: incoming connections allowed for this ocs binary",
   downDone: (pid) => `lan: daemon stopped (pid ${pid})`,
   downNotRunning: "lan: daemon is not running",
   downNotOurs: (pid) => `lan: pid ${pid} in daemon.json is not an ocs lan daemon; removed the stale state file`,
@@ -140,7 +142,8 @@ const zh: LanCatalog = {
     `lan: 守护进程已启动，实例名 ${name}，端口 ${port}（公钥 ${fp}）${discover ? "" : "，局域网发现已关闭"}`,
   upAlready: (pid, port) => `lan: 守护进程已在运行（pid ${pid}，端口 ${port}）；要改设置先 \`ocs lan down\``,
   upFailed: (detail) => `lan: 守护进程没起来：${detail}`,
-  upFirewallHint: "  macOS 可能会问一次是否允许 ocs 接受传入连接——要允许，否则对端连不进来。",
+  upFirewallHint: "  没能在 macOS 防火墙里放行 ocs——请到 系统设置 › 网络 › 防火墙 允许 ocs 的传入连接，否则对端连不进来。",
+  upFirewallAllowed: "  macOS 防火墙：已放行这个 ocs 程序的传入连接",
   downDone: (pid) => `lan: 守护进程已停止（pid ${pid}）`,
   downNotRunning: "lan: 守护进程没在运行",
   downNotOurs: (pid) => `lan: daemon.json 里的 pid ${pid} 不是 ocs lan 守护进程；已删掉陈旧状态文件`,

@@ -151,6 +151,13 @@ UDP 组播 `239.255.67.83:47891`（不用 mDNS，不和系统 mDNSResponder / av
   「已投递收件箱」。要让 agent 之间自动往来，设 `"crossSessionInbound": "accept"`（`ocs doctor --fix`）；
   代价是已配对机器发来的消息不经人确认就进入 agent。
 
+## macOS 防火墙
+
+应用防火墙开着时，没登记过的程序收不到局域网连接，而且**不报错**：对端只看到「连不上」，本机日志里一行都没有。
+放行规则按程序路径记，换安装位置、每次升级（ad-hoc 签名的 cdhash 会变）都要重新登记。所以 `ocs lan up`
+监听非回环地址时会用 `socketfilterfw --add/--unblockapp` 放行 ocs 自己（当前用户自己的程序不需要 sudo），
+登记失败时提示去 系统设置 › 网络 › 防火墙 手动允许。用 bun 跑源码时不代为放行 bun。
+
 ## 登录自启
 
 `ocs lan autostart on|off` 只写/删当前用户的登录项，不顺手启停：macOS 写

@@ -112,7 +112,11 @@ async function lanUp(ctx: LanCliContext): Promise<void> {
     const state = liveDaemonState();
     if (state !== null && state.pid === child.pid) {
       console.log(L.upStarted(state.name, state.port, shortFingerprint(id.fingerprint), state.discover));
-      if (process.platform === "darwin" && state.bind !== "127.0.0.1") console.log(L.upFirewallHint);
+      if (process.platform === "darwin" && !state.bind.startsWith("127.")) {
+        const firewall = allowThroughMacFirewall(ctx.selfCommand);
+        if (firewall === "failed") console.log(L.upFirewallHint);
+        else if (firewall === "allowed") console.log(L.upFirewallAllowed);
+      }
       return;
     }
     if (child.exitCode !== null) break;
@@ -125,6 +129,28 @@ async function lanUp(ctx: LanCliContext): Promise<void> {
     // 没日志
   }
   ctx.fail(L.upFailed(tail === "" ? "no state written within 5s" : tail));
+}
+
+/**
+ * macOS 应用防火墙开着时，没登记过的二进制收不到局域网连接——而且不报错：对端只看到
+ * 「连不上」，本机日志里什么都没有（2026-09-29 真机：换到正式安装路径后就是这样）。
+ * 放行规则按程序路径记，换位置、每次升级（ad-hoc 签名的 cdhash 会变）都得重登。
+ * `socketfilterfw --add/--unblockapp` 对当前用户自己的程序不需要 sudo，只登记 ocs 本身。
+ */
+function allowThroughMacFirewall(selfCommand: readonly string[]): "allowed" | "off" | "failed" | "skipped" {
+  // 源码方式跑（bun + cli.ts）时要放行的是 bun 本身，不替用户做这个决定。
+  if (selfCommand.length !== 1) return "skipped";
+  const fw = "/usr/libexec/ApplicationFirewall/socketfilterfw";
+  const state = spawnSync(fw, ["--getglobalstate"], { encoding: "utf8" });
+  if (state.status !== 0 || typeof state.stdout !== "string") return "failed";
+  if (!/enabled/i.test(state.stdout)) return "off";
+  const exe = selfCommand[0]!;
+  spawnSync(fw, ["--add", exe], { stdio: "ignore" });
+  spawnSync(fw, ["--unblockapp", exe], { stdio: "ignore" });
+  const apps = spawnSync(fw, ["--listapps"], { encoding: "utf8" });
+  const text = typeof apps.stdout === "string" ? apps.stdout : "";
+  const at = text.indexOf(`${exe} `) >= 0 ? text.indexOf(`${exe} `) : text.indexOf(`${exe}\n`);
+  return at >= 0 && /Allow incoming connections/.test(text.slice(at, at + exe.length + 80)) ? "allowed" : "failed";
 }
 
 /** 目标 pid 的命令行里要有 `_lan-daemon`：pid 复用时绝不能把别的进程杀掉。 */
