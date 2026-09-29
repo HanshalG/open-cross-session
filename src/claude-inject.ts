@@ -284,8 +284,21 @@ export function readPeerToken(
 ): string | null {
   const dir = nativeSessionsDir(env);
   if (dir === null) return null;
-  const hash = createHash("sha256").update(session.messagingSocketPath).digest("hex");
-  const path = join(dir, `${session.pid}.${hash}.key`);
+  // Windows 上 Claude 按**小写**规范化后的管道路径算哈希（2.1.284 实测：
+  // `\\.\pipe\LOCAL\cc-msg-…` 的 key 文件名是 `\\.\pipe\local\cc-msg-…` 的 sha256）。先试原样，
+  // Windows 再试小写。（ocs 新增，待回流上游）
+  const candidates = [session.messagingSocketPath];
+  if (platform() === "win32") candidates.push(session.messagingSocketPath.toLowerCase());
+  for (const socketPath of candidates) {
+    const token = readPeerTokenFile(dir, session.pid, socketPath);
+    if (token !== null) return token;
+  }
+  return null;
+}
+
+function readPeerTokenFile(dir: string, pid: number, socketPath: string): string | null {
+  const hash = createHash("sha256").update(socketPath).digest("hex");
+  const path = join(dir, `${pid}.${hash}.key`);
   try {
     const stat = lstatSync(path);
     if (
@@ -428,6 +441,12 @@ export type InjectFailureReason =
  * !isSocket 两条，任一条都足以拒投。
  */
 export function socketOwnershipFailure(sockPath: string): string | null {
+  // Windows：Claude 的收件箱是命名管道 `\\.\pipe\LOCAL\cc-msg-…`，lstat 不适用。LOCAL 命名空间
+  // 只对同一登录会话可见，管道 ACL 由 Claude 设；另外 Windows 上写入强制带 peer token
+  // （见 injectChannelMessage），两道一起替代 uid 校验。（ocs 新增，待回流上游）
+  if (platform() === "win32") {
+    return /^\\\\\.\\pipe\\/i.test(sockPath) ? null : "path is not a named pipe";
+  }
   let stat: ReturnType<typeof lstatSync>;
   try {
     stat = lstatSync(sockPath);

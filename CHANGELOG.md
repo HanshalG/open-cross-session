@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.0
+
+- 局域网模式（默认关闭）：`ocs lan up` 启动守护进程，`ocs lan pair` 出一次性配对码、另一台 `ocs lan pair <码>` 兑现；之后 `ocs dm <地址>@<对端>` 跨机发消息并唤醒、`ocs who --lan` 看远端 agent。Ed25519 身份 + 签名 X25519 握手 + AES-256-GCM，未配对机器只能兑现有效配对码；协议与威胁模型见 docs/lan.md
+- 唤醒 note 里的正文不再能冒充包装和骨架：`<cross-session-message` 被中和，行首形似 `Reply:` / `Thread:` / 唤醒首行的加 `> `（本地 DM 同样受益；wake-protocol §1 已更新，AgentParty 侧需同步）
+- 修复：0.5.1 起会话级 DM 写 `claude:<sessionId>` 身份，但身份校验没收这个命名空间，没有稳定工作区身份的 Claude 会话 `ocs dm` 直接报 `invalid sender identity`
+- Windows 可用（Win11 + Claude 2.1.284 真机验证）：命名管道收件箱、peer token 按小写管道路径取、管道名里没有 pid 时的自身识别、编译后的 exe 自启动子进程（`notify-when-idle` 的 watcher 和 lan 守护进程此前都起不来）、NTFS 下不查 mode 位
+- `ocs lan autostart on|off`：登录后自动起守护进程（macOS LaunchAgent、Windows HKCU Run、Linux systemd user unit）
+- Windows 发行：Release 附 `ocs-windows-x64.zip`，`irm …/install.ps1 | iex` 安装，`ocs upgrade` 在 Windows 上走 install.ps1；两个安装器都会用新版重启正在跑的 lan 守护进程
+- 局域网发现同时发子网定向广播：家用路由器 / VPN tun 吞掉组播时照样能找到
+- 唤醒失败时带上具体原因（此前只有 `write-failed`）
+- 投递阶梯从 cli.ts 抽到 `src/deliver.ts`，本地 dm 与远端 dm 共用
+
 ## 0.5.1
 
 - 会话级 DM（同一工作目录多会话、workspace continuity 退回时）改按 Claude sessionId 派生频道和 route 身份（`claude:<uuid>`），重启/自动改名后同一对会话仍在同一频道；此前按会话名，改名后老频道静默失联（#36）

@@ -16,6 +16,20 @@ test("release workflow signs and smokes macOS binaries before packaging", () => 
   expect(archive).toBeGreaterThan(smoke);
 });
 
+test("release workflow builds, smokes, and checksums the Windows binary on real Windows", () => {
+  const workflow = readFileSync(join(import.meta.dir, "..", ".github", "workflows", "release.yml"), "utf8");
+  const win = workflow.slice(workflow.indexOf("  windows:"));
+  expect(win).toContain("runs-on: windows-latest");
+  const build = win.indexOf("--target=bun-windows-x64 src/cli.ts --outfile ocs.exe");
+  const smoke = win.indexOf("./ocs.exe help");
+  const zip = win.indexOf("7z a -tzip ocs-windows-x64.zip ocs.exe");
+  const sum = win.indexOf("sha256sum ocs-windows-x64.zip > ocs-windows-x64.zip.sha256");
+  expect(build).toBeGreaterThan(0);
+  expect(smoke).toBeGreaterThan(build);
+  expect(zip).toBeGreaterThan(smoke);
+  expect(sum).toBeGreaterThan(zip);
+});
+
 test("macOS CI signs the compiled binary before its smoke test", () => {
   const workflow = readFileSync(join(import.meta.dir, "..", ".github", "workflows", "ci.yml"), "utf8");
   const build = workflow.indexOf("bun build --compile src/cli.ts --outfile /tmp/ocs");

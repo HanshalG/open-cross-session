@@ -43,3 +43,28 @@ jobs:
         run: |
           gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --notes "" 2>/dev/null || true
           gh release upload "${GITHUB_REF_NAME}" ${{ matrix.asset }}.tar.gz ${{ matrix.asset }}.tar.gz.sha256 --clobber
+  windows:
+    # Windows 只出二进制：仓库测试依赖 Unix socket / ps，照常在上面三个平台跑。
+    # 冒烟测试必须在真 Windows 上跑编译产物（交叉编译出来不跑一次不算数）。
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install
+      - name: build binary
+        run: bun build --compile --target=bun-windows-x64 src/cli.ts --outfile ocs.exe
+      - name: smoke test release binary
+        run: ./ocs.exe help && ./ocs.exe version
+      - name: package binary
+        run: |
+          7z a -tzip ocs-windows-x64.zip ocs.exe
+          sha256sum ocs-windows-x64.zip > ocs-windows-x64.zip.sha256
+      - name: attach to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --notes "" 2>/dev/null || true
+          gh release upload "${GITHUB_REF_NAME}" ocs-windows-x64.zip ocs-windows-x64.zip.sha256 --clobber

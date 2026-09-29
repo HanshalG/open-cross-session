@@ -1,6 +1,8 @@
 // CLI 输出的双语目录。英文是 canonical；zh 由 locale/OCS_LANG 选中。
 // 规则：新增用户可见字符串必须两种语言同时补齐（TypeScript 结构保证漏一即报错）。
 
+import { lanMessages } from "./i18n-lan.ts";
+
 export type Lang = "en" | "zh";
 
 export const OCS_LANG_ENV = "OCS_LANG";
@@ -223,6 +225,7 @@ Usage:
   ocs upgrade [--check | --party]
       Upgrade the ocs binary to the latest GitHub Release. --check only reports;
       --party prints the migration guide to hosted Agent Party (cross-machine channels).
+${lanMessages("en").help}
   ocs version | help
 
 --as is optional inside Claude, Codex, and Pi sessions (auto-detected; OCS_NAME also works).
@@ -501,6 +504,7 @@ const zh: Catalog = {
   ocs upgrade [--check | --party]
       把 ocs 二进制升级到最新 GitHub Release。--check 只报告不安装；
       --party 打印迁移到托管版 Agent Party（跨机器频道）的指南。
+${lanMessages("zh").help}
   ocs version | help
 
 在 Claude、Codex、Pi 会话里 --as 可省略（自动识别；OCS_NAME 也行）。

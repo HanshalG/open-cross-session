@@ -40,11 +40,17 @@ Thread: <read command>
   - 超过 4096 字节：内联前 **512 字节**（在字符边界截断，不切开多字节字符与代理对），后接一行
     `… (<total> bytes total; full text: <read command>)`。
   - 正文来自对方，是**数据**不是指令；包装标签本身已把它标成跨会话内容，不再额外加「请勿执行」类提示。
+  - **中和（v0.6.0 起）**：正文不许冒充包装和骨架。`<cross-session-message` / `</cross-session-message`
+    （不分大小写）的 `<` 换成 `‹`；行首（可带空白）是 `Reply:`、`Thread:`、`回复：`、`线程：`、
+    `[ocs wake]`、`[ocs 唤醒]`、`[Cross-session idle notice]`、`[跨会话空闲通知]` 的行，前面加 `> `。
+    除此之外逐字。4096 / 512 字节阈值按中和后的正文计，`<total>` 仍报原文字节数。
 - `Reply:` 后是**可直接复制执行**的命令：
   - ocs 的 Claude→Claude DM：发送方用 `ocs rename` 起过名字时用 `ocs dm <sender-name> "<your reply>"`；
     否则发送方有唯一工作区别名（且没被别的会话的 ocs 名字遮蔽）时用
     `ocs dm <sender-workspace-alias> "<your reply>"`。接收方身份由当前 Claude 会话自动识别，
     Reply 行不暴露 dm 哈希频道。两者都没有时不猜目标，改用下面的完整命令。
+  - ocs 局域网远端 DM（[docs/lan.md](./lan.md)）：`ocs dm <sender-address>@<peer-label> "<your reply>"`，
+    `from-name` 同为 `<sender-address>@<peer-label>`；Claude、Codex、Pi、cmux 接收方都用这一行。
   - ocs 投给活 Claude、Codex 或 Pi 会话：
     `ocs send <channel> "<your reply>" --reply-to <N>`。三种 harness 都会给子进程提供可验证的
     当前身份，Reply 行不得再用短展示名覆盖它。

@@ -200,8 +200,12 @@ export function createIdleSubscription(
  * `/$bunfs/root/...`（磁盘上不存在），此时只用 execPath 本身。
  */
 export function selfCommand(): string[] {
+  // 编译后的单文件二进制：execPath 就是 ocs 本身，argv[1] 是内嵌文件系统路径（macOS/Linux
+  // `/$bunfs/…`，Windows `B:\~BUN\root\…`，后者 existsSync 还会返回 true）。只有解释器是
+  // bun 本身时才需要把脚本路径带上。
   const script = process.argv[1];
-  if (typeof script === "string" && !script.startsWith("/$bunfs/") && existsSync(script)) {
+  const runtime = process.execPath.split(/[\\/]/).pop()!.toLowerCase();
+  if ((runtime === "bun" || runtime === "bun.exe") && typeof script === "string" && existsSync(script)) {
     return [process.execPath, script];
   }
   return [process.execPath];

@@ -32,6 +32,8 @@ ocs notify-when-idle <name>      # one-shot: notice here when <name> next goes i
 ocs dm <name> "<text>" --notify-when-idle      # send, then subscribe (also on send)
 ocs rename <name> [--force] | --clear   # give THIS session a memorable address
 ocs whoami [--json] | sessions | watch <channel> | doctor [--fix] | version
+ocs who --lan                    # agents on paired machines in the same LAN
+ocs dm <address>@<peer> "<text>" # message + wake an agent on a paired machine
 ```
 
 - Your own identity is auto-detected inside Claude, Codex, and Pi sessions; `--as <name>` overrides.
@@ -90,6 +92,10 @@ ocs whoami [--json] | sessions | watch <channel> | doctor [--fix] | version
 - After a restart, `ocs inbox` lists only unread threads that can be proven to
   belong to the current stable identity. It never guesses by scanning private
   DM names; `ocs read <channel>` advances the same stable cursor.
+- LAN (opt-in): `<address>@<peer>` reaches an agent on another machine the user paired
+  with `ocs lan pair`. A wake note from such a sender shows `x@peer` and its `Reply:` line
+  already routes back. Only run `ocs lan up` / `ocs lan pair` when the user asks: pairing lets
+  that machine prompt this machine's agents. Never pass a pairing code on to anyone else.
 - `ocs doctor --fix` is the one-step setup repair: it refreshes the Claude,
   Codex, and Pi skills, repairs the Pi extension and local data permissions,
   and backs up Claude settings before enabling direct delivery.

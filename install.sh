@@ -44,11 +44,20 @@ chmod +x "$tmp/ocs"
 # 冒烟通过前不动现有安装；staging 放同一目录内，rename 才是原子的。
 "$tmp/ocs" help >/dev/null || { echo "downloaded binary failed smoke test" >&2; exit 1; }
 mkdir -p "$INSTALL_DIR"
+# 局域网守护进程在跑的话，换完二进制要用新版重启它（旧版本没有 lan 子命令，按没在跑处理）。
+restart_lan=0
+if [ -x "$INSTALL_DIR/ocs" ] && "$INSTALL_DIR/ocs" lan status --json 2>/dev/null | grep -q '"running": true'; then
+  restart_lan=1
+fi
 staged="$INSTALL_DIR/.ocs.staged.$$"
 mv "$tmp/ocs" "$staged"
 mv -f "$staged" "$INSTALL_DIR/ocs"
 
 echo "installed: $INSTALL_DIR/ocs"
+if [ "$restart_lan" = 1 ]; then
+  "$INSTALL_DIR/ocs" lan down >/dev/null 2>&1 || true
+  "$INSTALL_DIR/ocs" lan up || echo "warning: could not restart the LAN daemon; run: ocs lan up" >&2
+fi
 case ":$PATH:" in
   *":$INSTALL_DIR:"*) ;;
   *) echo "note: add $INSTALL_DIR to your PATH" ;;

@@ -1,0 +1,181 @@
+# 局域网 ocs（v0.6.0 起）
+
+同一局域网里的两台机器配对之后，一台上的 agent 可以 `ocs dm <地址>@<对端> "…"` 给另一台上的
+Claude / Codex / Pi 会话发消息并唤醒它，`ocs who --lan` 列出对端可达的 agent。
+默认关闭，`ocs lan up` 才开。
+
+```bash
+# 机器 A（例如 mini）
+ocs lan up
+ocs lan pair                 # 打印一次性配对码，等待兑现
+
+# 机器 B（例如 laptop）
+ocs lan up
+ocs lan pair 7K2M-…          # 兑现；局域网发现找到 A，屏蔽组播的网络加 --addr <A-ip>:47890
+ocs who --lan                # A 上的 agent：claude-1a2b3c4d@mini …
+ocs dm claude-1a2b3c4d@mini "帮我看下 CI"
+```
+
+A 那边被唤醒的会话看到发送者是 `claude-9f8e7d6c@laptop`，`Reply:` 行是
+`ocs dm claude-9f8e7d6c@laptop "<your reply>"`，复制执行就回到 B。
+
+范围：只有跨机 DM 和远端花名册。频道不跨机复制；两台机器各有自己的频道日志和 seq
+（铁律 1 不变）。跨组织、跨网络、多方频道仍然是托管版 Agent Party 的事。
+
+## 威胁模型
+
+对端能做的事：列出本机可达会话（地址、种类、忙闲、一句短标签；没有 pid、路径、cwd），
+给其中任何一个发 DM 并唤醒它。这等于本机另一个会话能做的事，所以**配对就是授权**，
+要当成「允许这台机器给我的 agent 下提示」来对待。消息正文进入对方 agent 的上下文时仍然
+包在跨会话标签里、标明来源 `x@peer`，是数据不是指令；Claude 侧的 `crossSessionInbound`
+闸照常生效。
+
+防的是同一局域网里的其他人（咖啡馆 Wi-Fi、公司网、被攻破的 IoT 设备）：
+
+| 攻击 | 挡法 |
+|---|---|
+| 未配对机器连上来发消息、看花名册 | 握手后按公钥查信任库；未配对只能兑现一份开着的配对码，其它请求一律 `unpaired` |
+| 冒充已配对的对端 | 身份 = Ed25519 公钥；客户端钉死完整指纹，服务端按公钥查信任库；IP / 名字只是提示 |
+| 中间人 | 服务端签名覆盖双方临时公钥；客户端签名再覆盖双方长期公钥；换任何一把钥匙签名都验不过 |
+| 窃听 | 每连接临时 X25519 + HKDF → AES-256-GCM；前向保密 |
+| 篡改 / 重放 / 删帧 / 调序 / 反射 | GCM 隐式计数器（不上线）、按方向分钥、方向写进 AAD |
+| 截获配对码后抢先兑现、或冒名发码方 | 码里含发码方公钥指纹前 64 位，客户端先核对再发令牌；令牌一次性、10 分钟过期 |
+| 猜配对码 | 56 位令牌只能在线猜；所有开着的邀请累计 5 次错码即作废 |
+| 远端冒充本机会话名 | 发送者一律显示 `<对方地址>@<本机给对端起的 label>`，label 远端改不了 |
+| 正文闭合包装标签、伪造 `Reply:` 行 | 唤醒 note 里正文的 `<cross-session-message` 被中和成 `‹…`，行首形似 `Reply:` / `Thread:` / 唤醒首行的加 `> `（wake-protocol §1）；Codex queue / Pi / cmux 这类没有包装的载体同样生效 |
+| 远端随手造频道塞满磁盘 | 远端 DM 只投活目标（Claude 活会话或登记过的 ocs 名字；Codex 要有活进程持有 rollout；Pi 要有活登记），其余 `not-found` 不落盘；每对端限速 30 条突发、0.5 条/秒，且每 UTC 日正文 ≤16 MiB |
+| 资源耗尽 | 握手帧 ≤1 KiB（未配对全程 ≤1 KiB），已配对 ≤1 MiB，大小在分配前检查；一问一答之外多出来的帧（流水线灌帧）立即断开；并发 64，其中未认证（含握完手但未配对的）每 IP 8、全局 32，一直占名额直到断开；握手 5 秒、未配对请求 5 秒超时 |
+| 对端往本机终端塞转义序列 | 远端返回的每个字符串都校验或清洗：地址必须过 `NAME_RE`，错误码限 `[a-z-]`，其余文本剥控制字符、限长；对端自报名进信任库前收成 label 字符集 |
+| 远端 DM 顺带打探本机 | 应答里不带歧义候选（含 pid / cwd）、不带原始错误信息，投递行里的 pid 抹掉 |
+| 发现被用来放大流量 | 查询必须补齐到 ≥256 字节，应答恒比查询小；每源 10 秒 10 次，限速表满时新来源不应答（不清表）；查询方最多收 32 条应答、按指纹筛后最多试 4 个地址 |
+| 本机其他用户改信任库 / 读私钥 | `$OCS_HOME/lan` 0700、文件 0600；加载时发现非本人、符号链接、组/其他可访问即拒绝（ssh 式） |
+| 守护进程把启动它的会话当成自己 | 启动时剥掉 `CLAUDE_CODE_*` / `CODEX_THREAD_ID` / `OCS_NAME` / `OCS_PI_SESSION_ID` |
+
+不防：同一局域网的人可以连猜 5 次错码把**当前开着的**配对码作废（只是拒绝服务，猜不中；
+重新出码即可，`ocs lan pair` 会明说码被作废了）。已配对机器本身被攻破（它本来就被授权了；`ocs lan unpair` 撤销）、本机 root、
+流量分析（能看到两台机器在通信、大致多大）。
+
+## 协议 `ocs-lan/1`
+
+TCP，默认端口 47890。帧 = 4 字节大端长度 + 载荷。**一请求一连接**，没有长连接状态。
+
+```
+C → S  hello      {t, proto, eph_c, nonce_c}                    明文 JSON
+S → C  hello-ack  {t, proto, eph_s, nonce_s, key_s, sig_s}      明文 JSON
+C → S  auth       {t, key_c, sig_c, port}                       AEAD c2s #0
+S → C  welcome    {t, paired, name}                             AEAD s2c #0（密钥确认）
+C → S  请求 {op, …}                                             AEAD c2s #1
+S → C  应答 {ok, …}                                             AEAD s2c #1
+```
+
+- `eph_*`：X25519 临时公钥 32B；`nonce_*` 16B；`key_*`：Ed25519 长期公钥 32B；全部标准 base64，
+  长度不对即断。
+- `th = SHA-256("ocs-lan/1\0transcript\0" ‖ eph_c ‖ nonce_c ‖ eph_s ‖ nonce_s ‖ key_s)`（定长拼接）。
+- `sig_s = Ed25519(key_s, "ocs-lan/1\0server\0" ‖ th)`；
+  `sig_c = Ed25519(key_c, "ocs-lan/1\0client\0" ‖ th ‖ key_s ‖ key_c)`。
+- `c2s ‖ s2c = HKDF-SHA256(ikm = X25519(eph), salt = th, info = "ocs-lan/1\0keys", 64)`；
+  共享秘密全零（小阶点）即拒。
+- AEAD = AES-256-GCM（Bun 没有 ChaCha20-Poly1305），IV = 4 字节 0 ‖ 8 字节大端计数器，
+  每方向从 0 起、每帧 +1、不上线；AAD = `"ocs-lan/1\0c2s"` / `"ocs-lan/1\0s2c"`。
+- 客户端收到 `hello-ack` 验签后**先核对 `key_s`**（已配对：完整指纹；配对中：配对码里的前缀），
+  不符就断开，本机身份和请求都不发出。
+- 指纹 = base32(SHA-256(key))，52 字符，小写 RFC 4648 字母表。
+
+请求：
+
+| op | 谁能发 | 请求 | 应答 |
+|---|---|---|---|
+| `ping` | 已配对 | — | `{ok, name}` |
+| `who` | 已配对 | — | `{ok, name, entries:[{address, kind, status?, label?}]}` |
+| `dm` | 已配对 | `{from, from_key, to, body, lang}` | `{ok, channel, seq, to_key, to_display, outcome, lines}` 或 `{ok:false, error}` |
+| `pair` | 任何人 | `{token, name}` | `{ok, name}` 或 `{ok:false, error}` |
+
+`from` 是对方回复用的地址（ocs 名字优先，否则短 id），`from_key` 是不随改名变的短 id。
+`outcome` 是远端唤醒阶梯的总体结果（`ok` / `failed` / `unknown`），映射到发送方退出码 0 / 2 / 3，
+语义同本机 DM：落盘了就别重发。请求发出后没收到应答同样按 `unknown`（退出码 3）处理，
+**绝不自动重发**（铁律 5）。
+
+### 频道与身份
+
+两端各自落盘，频道名按同一规则派生，所以一来一回落在同一个频道：
+
+```
+lan-<SHA-256(对端指纹 ‖ 0 ‖ 本机参与者短 id ‖ 0 ‖ 远端参与者短 id) 前 32 hex>
+```
+
+接收方写 `from = <对方地址>.<label>`（`@` 不在 `NAME_RE` 里，旧二进制会拒读），route 旁车帧写
+`from_identity = lan:<对端指纹>:<对方短 id>`、`to_identity = <本机目标身份>`，`ocs inbox`
+据此认领；发送方在远端确认落盘**之后**写本机副本（`to_identity = lan:<对端指纹>:<目标短 id>`）。
+
+## 配对
+
+发码方 `ocs lan pair`（守护进程要在跑）写一份邀请到 `$OCS_HOME/lan/offers/`（只存令牌摘要），
+打印配对码并阻塞等待，成功、过期、作废、Ctrl+C、关终端（SIGHUP）都会删掉邀请。兑码时「写信任库 + 标记已配对」
+和发码方「关闭邀请」在同一把锁里互斥，不会出现对方已被信任、发码方却报取消的情况。配对码 =
+Crockford base32(指纹摘要前 8 字节 ‖ 7 字节随机令牌)，24 字符分 6 组，容忍小写和 I/L/O 混淆。
+
+兑码方 `ocs lan pair <码>`：局域网发现（或 `--addr`）找候选地址 → 握手核对指纹前缀 →
+发 `pair{token}` → 双方把对方公钥写进信任库。前缀 64 位决定了冒名发码方要在 10 分钟内找到
+一把 SHA-256 前 64 位相同的 Ed25519 钥匙；令牌只在已认证发码方的加密通道里发出，被动窃听拿不到。
+
+`--label` 设本机给对端起的名字（`x@<label>` 里那段），缺省用对方自报的实例名，重名自动加 `-2`。
+
+## 发现
+
+UDP 组播 `239.255.67.83:47891`（不用 mDNS，不和系统 mDNSResponder / avahi 抢 5353）。
+查询 `{"ocs":"lan-query","v":1,"n":<nonce>,"pad":"000…"}`（用 `pad` 补齐到 ≥256 字节，更短的查询不应答），应答单播 `{"ocs":"lan-here","v":1,"n","name","port","fp"}`。
+应答不认证，只当地址提示；只含实例名、端口、公钥指纹。每个源地址 10 秒最多应答 10 次，
+应答恒比查询小，没有放大。`ocs lan up --no-discover` 关掉应答，只能靠 `--addr` 配对、靠已知地址互联；
+守护进程只听回环（`--bind 127.0.0.1`）时发现也只在回环上。
+
+查询同时发往组播组和每张网卡的子网定向广播（`192.168.1.255` 这类，/31、/32 的点对点网卡跳过）。
+2026-09-29 真机实测：家用路由器 + 两端都开着 sing-box tun 时组播到不了，定向广播可以。
+
+组播被屏蔽（访客网络的客户端隔离很常见）时：配对用 `--addr`，之后信任库记住地址，DHCP 换地址时
+再靠发现按指纹找回。
+
+## Windows
+
+2026-09-29 真机验证：Win11 + Claude 2.1.284 ↔ macOS。
+
+- Claude 的收件箱是命名管道 `\\.\pipe\LOCAL\cc-msg-<hex>`。`LOCAL\` 只对**同一登录会话**可见，
+  所以守护进程必须跑在 Claude 所在用户的桌面会话里。经 SSH 以别的账号起的进程连不上。
+  远程操作时用交互式计划任务，Principal 指定那个桌面用户（`-LogonType Interactive`）。
+- 写管道强制带 peer token，token 文件名是**小写**管道路径的 sha256。
+- 自身识别：管道名里没有 pid，按 `CLAUDE_CODE_SESSION_ID` + `CLAUDE_CODE_MESSAGING_SOCKET`
+  在会话目录里找唯一匹配。Windows 没有 `ps`，祖先链兜底不可用。
+- 文件权限靠 NTFS ACL（用户目录默认私有），不检查 mode 位。
+- 防火墙：给 `ocs.exe` 放行入站 TCP 47890、UDP 47891。家里 Wi-Fi 常被识别成「公用」网络，
+  这时规则要带上 Public，并用 `-RemoteAddress <本网段>` 收窄范围，不要整体改网络类型。
+- `crossSessionInbound` 默认 hold：远端消息进收件箱后 5 分钟没人点投递就被丢弃，发送方看到的仍是
+  「已投递收件箱」。要让 agent 之间自动往来，设 `"crossSessionInbound": "accept"`（`ocs doctor --fix`）；
+  代价是已配对机器发来的消息不经人确认就进入 agent。
+
+## 登录自启
+
+`ocs lan autostart on|off` 只写/删当前用户的登录项，不顺手启停：macOS 写
+`~/Library/LaunchAgents/com.leeguooooo.ocs.lan.plist`（RunAtLoad，不 KeepAlive，`ocs lan down` 能真停），
+Windows 写 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\ocs-lan`（跑 `ocs.exe lan up`，不需要管理员，
+而且落在用户自己的登录会话里——够得着 `LOCAL\` 管道），Linux 写 systemd user unit。换了安装位置
+`ocs lan status` 会显示「失效」，重跑 `on` 即可。安装器（install.sh / install.ps1）发现守护进程在跑时会用新版重启它。
+
+## 本机状态
+
+```
+$OCS_HOME/lan/            0700
+  identity.json           Ed25519 私钥（PKCS#8），0600，首次使用时 O_EXCL 生成
+  peers.json              信任库：label、公钥、指纹、自报名、最近地址；指纹必须能从公钥重算
+  config.json             name / port / bind / discover
+  offers/<id>.json        开着的配对邀请（令牌只存摘要）
+  daemon.json             运行中守护进程的 pid / 端口 / 指纹
+  daemon.log              连接与请求摘要（不含正文），1 MiB 轮转
+```
+
+重装丢了 `identity.json` 等于换了一台机器：对端会报「公钥不一致」的安全警告，需要
+`ocs lan unpair <它>` 后重新配对。
+
+## 已知限制 / 后续
+
+- 远端 DM 不支持 `--notify-when-idle` / `--inherit`；`ocs send` 的 `@x@peer` 点名不跨机。
+- 只有 IPv4 发现；TCP 可以 `--bind` 到 IPv6 地址但未专门测试。
+- 授权是整机粒度，没有「只许对端找某几个会话」的细粒度 ACL。

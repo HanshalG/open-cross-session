@@ -19,6 +19,7 @@ Native cross-session messaging stops at the product boundary. `ocs` adds the pie
 - **One roster and one workflow:** `ocs who`, `ocs dm`, automatic sender detection, bundled skills, and `ocs doctor` work across all supported harnesses.
 - **Safer delivery behavior:** Pi queues messages behind a busy turn, cmux never types into a busy TUI, self-wakes are suppressed, and unknown IPC outcomes are reported without retrying and risking duplicates.
 - **Local by default:** no daemon, account, API key, or server; one static binary and files under `~/.ocs`.
+- **Opt-in LAN:** `ocs lan up` + a one-time pairing code lets agents on two machines in the same network DM each other (`ocs dm claude-1a2b3c4d@mini …`) over a mutually authenticated, encrypted link. Off by default; unpaired machines get nothing.
 
 When one machine stops being enough, the same habits carry over to [Agent Party](https://github.com/leeguooooo/agentparty), a team integration and coordination solution for cross-machine, cross-org channels. Use the hosted service, or [self-host it](https://github.com/leeguooooo/agentparty) within Cloudflare's Free plan quotas.
 
@@ -64,7 +65,13 @@ curl -fsSL https://raw.githubusercontent.com/leeguooooo/claude-code-usage-bar/ma
 curl -fsSL https://raw.githubusercontent.com/leeguooooo/open-cross-session/main/install.sh | sh
 ```
 
-Single static binary, zero runtime dependencies. macOS (arm64/x64) and Linux (x64).
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/leeguooooo/open-cross-session/main/install.ps1 | iex
+```
+
+Single static binary, zero runtime dependencies. macOS (arm64/x64), Linux (x64), and Windows (x64).
 The installer also registers the version-matched ocs skill for Claude Code,
 Codex, and Pi. It uses the pinned `skills` CLI when `npx` is available, with
 telemetry disabled, then runs the binary's embedded fallback and Pi-extension
@@ -177,6 +184,7 @@ message stays in the append-only log for recovery with `ocs inbox`.
 | `ocs doctor` | Health check for Claude, Codex, Pi, skills, and the data directory; `--fix` repairs safe local setup and re-checks it |
 | `ocs skill install` | Repair/update the bundled skill for Claude Code, Codex, and Pi, plus Pi's direct-wake extension |
 | `ocs upgrade` | Fetch and install the latest GitHub Release binary (`--check` only reports; `--party` prints the hosted Agent Party migration path) |
+| `ocs lan up \| pair \| who \| status \| peers \| scan \| unpair \| down` | Opt-in LAN mode: pair machines, then `ocs dm <address>@<peer>` and `ocs who --lan` (see [Cross-machine](#cross-machine)) |
 | `ocs version` | Print the version |
 
 **Stuck below 0.4.3?** `ocs upgrade` only started upgrading the binary in 0.4.3 — before
@@ -238,12 +246,43 @@ ocs's Claude carrier literally rides on the native inbox socket. Use ocs when th
 conversation crosses vendors, needs more than two participants, needs messages to
 survive one side being offline, or should leave an auditable trail.
 
-## Cross-machine: keep OCS local
+## Cross-machine
 
-OCS deliberately has no public listener, remote shell, credential store, or job
-runner. For hosted cross-machine coordination, use Agent Party. When two personal
-machines already have passwordless SSH, keep authentication and host-key checking
-in the user's SSH config and invoke the target machine's local tools directly:
+### Same LAN: `ocs lan` (opt-in)
+
+Pair two machines once, then address a remote agent as `<address>@<peer>`:
+
+```bash
+# machine A ("mini")
+ocs lan up                  # start the LAN daemon (off until you do this)
+ocs lan pair                # prints a one-time code, waits up to 10 minutes
+
+# machine B
+ocs lan up
+ocs lan pair 7K2M-9QXD-…    # finds A on the LAN; if multicast is blocked add --addr <A-ip>:47890
+ocs who --lan               # agents on A: claude-1a2b3c4d@mini  claude  idle  …
+ocs dm claude-1a2b3c4d@mini "can you look at the CI failure?"
+```
+
+The woken session on A sees the sender as `claude-9f8e7d6c@<label>` and a `Reply:` line
+that routes straight back. `ocs lan status | peers | scan | who | unpair <peer> | down`
+manage it; `ocs lan autostart on` starts the daemon at login. For agents to answer each
+other without a human clicking "deliver" on every message, the receiving Claude needs
+`crossSessionInbound: accept` (`ocs doctor --fix`) — otherwise held messages drop after 5 minutes.
+Windows specifics (named-pipe inbox, firewall rule): [docs/lan.md](./docs/lan.md#windows).
+
+Security, in short: every machine has an Ed25519 key; pairing binds the issuer's key
+fingerprint into the code, so there is no trust-on-first-use; each connection runs a
+signed X25519 handshake with forward secrecy and AES-256-GCM; unpaired machines can only
+redeem a live code. **Pairing means "this machine may prompt my agents"** — the same
+power a local session has. Discovery replies reveal only an instance name, port, and key
+fingerprint. Full protocol and threat model: [docs/lan.md](./docs/lan.md).
+
+### Anywhere else: SSH
+
+Without the LAN daemon OCS has no listener at all. When two personal machines already
+have passwordless SSH, keep authentication and host-key checking in the user's SSH
+config and invoke the target machine's local tools directly:
 
 ```bash
 ssh workbox ocs who --verbose
@@ -259,13 +298,15 @@ A, then B is the controller and A is `workbox`; no reverse login or OCS adapter 
 needed. Prefix remote targets with the SSH host in human-facing instructions (for
 example `workbox/reviewer`) so they cannot be confused with same-named local agents.
 
+For cross-network or cross-org coordination and shared multi-party channels, use Agent Party.
+
 ## Local vs hosted
 
 | | Open Cross-session | [Agent Party](https://github.com/leeguooooo/agentparty) |
 |---|---|---|
 | Best for | personal use and single-machine coordination | team integration and shared channels |
 | Deployment | none — a single binary | hosted service, or [self-hosted](https://github.com/leeguooooo/agentparty) on Cloudflare |
-| Scope | one machine, many agents | cross-machine, cross-org |
+| Scope | one machine, many agents; paired machines on one LAN | cross-machine, cross-org |
 | Transport | local sockets + JSONL log | Cloudflare Workers + Durable Objects |
 | Included coordination | local channels, unified roster, direct wake, idle notifications | directed delivery, leases, presence, tasks, web UI |
 

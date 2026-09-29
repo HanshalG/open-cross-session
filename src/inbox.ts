@@ -50,7 +50,7 @@ function matchedIdentities(
   messages: readonly RoutedOcsMessage[],
   context: InboxIdentityContext,
 ): string[] {
-  if (!channel.startsWith("dm-")) return [];
+  if (!channel.startsWith("dm-") && !channel.startsWith("lan-")) return [];
   const owned = new Set(context.identities);
   const matched = new Set<string>();
   for (const message of messages) {
@@ -120,7 +120,8 @@ export function listInboxThreads(
     const joined = cursorExists(channel, context.primaryName, env) || state.consumers
       .slice(1)
       .some((consumer) => cursorExists(channel, consumer, env));
-    const dm = channel.startsWith("dm-");
+    // lan-* 是跨机 DM（docs/lan.md），归属规则同 dm-*。
+    const dm = channel.startsWith("dm-") || channel.startsWith("lan-");
     const unread = messages.filter((message) => {
       if (message.seq <= state.cursor || isInboxSelf(message, context)) return false;
       if (message.to_identity !== undefined && identities.has(message.to_identity)) return true;

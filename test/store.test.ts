@@ -281,6 +281,29 @@ describe("isOcsMessage 镜像铁律（上游 #622 教训）", () => {
     })).toThrow("must be provided together");
   });
 
+  test("会话级 claude:<sessionId> 与局域网 lan:<指纹>:<地址> 身份能落盘并读回", () => {
+    // 回归：0.5.1 起会话级 DM 写 claude:<sessionId>，但身份正则没收这个命名空间，
+    // 没有稳定工作区身份的 Claude 会话一 dm 就 invalid sender identity。
+    const env = freshEnv();
+    const fp = "a".repeat(52);
+    appendMessage({
+      channel: "m",
+      from: "a",
+      from_identity: "claude:ae38e21b-1111-2222-3333-444455556666",
+      to_identity: `lan:${fp}:bob`,
+      body: "x",
+      env,
+    });
+    expect(readRoutedMessages("m", { env })[0]).toMatchObject({
+      from_identity: "claude:ae38e21b-1111-2222-3333-444455556666",
+      to_identity: `lan:${fp}:bob`,
+    });
+    for (const bad of ["claude:xyz", `lan:${fp}:bad name`, "lan:short:bob"]) {
+      expect(() => appendMessage({ channel: "m", from: "a", from_identity: bad, to_identity: "name:b", body: "x", env }))
+        .toThrow("invalid sender identity");
+    }
+  });
+
   test("消息落盘后追加的 route 不能改写既有消息归属", () => {
     const env = freshEnv();
     appendMessage({ channel: "m", from: "a", body: "plain", env });

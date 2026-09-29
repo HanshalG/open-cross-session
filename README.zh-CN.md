@@ -19,6 +19,7 @@
 - **一张花名册、一套命令：** `ocs who`、`ocs dm`、发送者自动识别、内置 skill 和 `ocs doctor` 对所有已支持的载体使用同一套操作。
 - **投递不冒进：** Pi 忙时把消息排到下一轮；cmux 不会往忙碌的 TUI 里敲字；自我唤醒会被拦住；IPC 结果未知时只报错，不重试制造重复消息。
 - **默认只在本机：** 不需要 daemon、账号、API key 或服务器。一个静态二进制，数据都在 `~/.ocs`。
+- **局域网按需开启：** `ocs lan up` + 一次性配对码，同一网络里两台机器的 agent 就能互发 DM（`ocs dm claude-1a2b3c4d@mini …`），链路双向认证、加密。默认关闭，未配对的机器什么都拿不到。
 
 单机不够用时，同样的习惯可以平移到 [Agent Party](https://github.com/leeguooooo/agentparty)。它是面向团队联调的解决方案，支持跨机器、跨组织频道。你可以使用托管服务，也可以[私有部署](https://github.com/leeguooooo/agentparty)；用量在额度内时，Cloudflare 免费套餐就够用。
 
@@ -58,7 +59,13 @@ curl -fsSL https://raw.githubusercontent.com/leeguooooo/claude-code-usage-bar/ma
 curl -fsSL https://raw.githubusercontent.com/leeguooooo/open-cross-session/main/install.sh | sh
 ```
 
-单文件静态二进制，运行时零依赖。支持 macOS（arm64/x64）和 Linux（x64）。安装器会给
+Windows（PowerShell）：
+
+```powershell
+irm https://raw.githubusercontent.com/leeguooooo/open-cross-session/main/install.ps1 | iex
+```
+
+单文件静态二进制，运行时零依赖。支持 macOS（arm64/x64）、Linux（x64）和 Windows（x64）。安装器会给
 Claude Code、Codex、Pi 注册与二进制同版本的 ocs skill：有 `npx` 时调用固定版本的
 `skills` CLI，并关闭 telemetry；随后运行二进制内置安装，补上 Pi 直投扩展。只装二进制：
 
@@ -160,6 +167,7 @@ fail closed，IPC 结果未知时绝不降级。没有安全载体时，消息�
 | `ocs doctor` | 体检 Claude、Codex、Pi、三端 skill 和数据目录；`--fix` 安全修复本地安装并复检 |
 | `ocs skill install` | 修复或更新 Claude Code、Codex、Pi 的内置 skill，并安装 Pi 直投扩展 |
 | `ocs upgrade` | 迁移到托管版的指引 |
+| `ocs lan up \| pair \| who \| status \| peers \| scan \| unpair \| down` | 局域网模式（默认关闭）：配对机器后 `ocs dm <地址>@<对端>`、`ocs who --lan`（见[跨机器](#跨机器)） |
 | `ocs version` | 打印版本 |
 
 数据在 `~/.ocs`（`OCS_HOME` 可覆盖），频道是 JSONL 文件。备份时应保留整个目录，
@@ -199,9 +207,38 @@ v0.3.4 之前的历史可用 `--inherit` 绑定一次；工作区不唯一、旧
 原生收件箱 socket 上。当对话跨厂商、超过两方、需要消息在一边离线时不丢、或要留
 可审计记录时，用 ocs。
 
-## 跨机器：保持 OCS 本地化
+## 跨机器
 
-OCS 刻意不提供公网监听、远程 shell、凭据存储或通用任务执行器。需要托管的跨机器协作时用 Agent Party。两台个人机器已有免密 SSH 时，继续由用户的 SSH config 负责认证与 host key 校验，控制端直接调用目标机器上的本地工具：
+### 同一局域网：`ocs lan`（默认关闭）
+
+两台机器配对一次，之后用 `<地址>@<对端>` 找远端 agent：
+
+```bash
+# 机器 A（mini）
+ocs lan up                  # 启动局域网守护进程（不跑这句就没有任何监听）
+ocs lan pair                # 打印一次性配对码，最多等 10 分钟
+
+# 机器 B
+ocs lan up
+ocs lan pair 7K2M-9QXD-…    # 在局域网里找到 A；组播被屏蔽时加 --addr <A的IP>:47890
+ocs who --lan               # A 上的 agent：claude-1a2b3c4d@mini  claude  idle  …
+ocs dm claude-1a2b3c4d@mini "帮我看下 CI 为什么挂了"
+```
+
+A 上被唤醒的会话看到发送者是 `claude-9f8e7d6c@<label>`，`Reply:` 行直接回到 B。
+`ocs lan status | peers | scan | who | unpair <对端> | down` 管理配对和守护进程，
+`ocs lan autostart on` 让守护进程登录后自动启动。想让两边 agent 自动互回、不用每条都有人点「投递」，
+接收方 Claude 要设 `crossSessionInbound: accept`（`ocs doctor --fix`），否则被扣住的消息 5 分钟后就丢了。
+Windows 的注意事项（命名管道收件箱、防火墙规则）见 [docs/lan.md](./docs/lan.md#windows)。
+
+安全要点：每台机器一把 Ed25519 身份密钥；配对码里带着发码方公钥指纹，不存在「首次连接即信任」；
+每次连接都是带签名的 X25519 握手（前向保密）+ AES-256-GCM；未配对的机器除了兑现一个有效配对码，
+什么都做不了。**配对等于允许那台机器给你的 agent 下提示**，和本机另一个会话的权限一样。
+局域网发现的应答只包含实例名、端口和公钥指纹。完整协议与威胁模型见 [docs/lan.md](./docs/lan.md)。
+
+### 其他情况：SSH
+
+不开局域网守护进程时 OCS 没有任何监听。两台个人机器已有免密 SSH 时，继续由用户的 SSH config 负责认证与 host key 校验，控制端直接调用目标机器上的本地工具：
 
 ```bash
 ssh workbox ocs who --verbose
@@ -214,13 +251,15 @@ ssh workbox herdr agent prompt reviewer "跑测试并总结失败" --wait --time
 
 SSH 免密方向决定角色。如果只有机器 B 能连接机器 A，那么 B 就是控制端，A 就是 `workbox`；不需要反向登录或新增 OCS adapter。面向人的指令应给远端 agent 带上 SSH 主机命名空间（例如 `workbox/reviewer`），避免与本机同名 agent 混淆。
 
+跨网络、跨组织、多方共享频道，用 Agent Party。
+
 ## 本地版与托管版
 
 | | Open Cross-session | [Agent Party](https://github.com/leeguooooo/agentparty) |
 |---|---|---|
 | 适合 | 个人使用与单机协作 | 团队联调与共享频道 |
 | 部署 | 无，单个二进制 | 托管服务，或[私有部署](https://github.com/leeguooooo/agentparty)到 Cloudflare |
-| 范围 | 单机多 agent | 跨机器、跨组织 |
+| 范围 | 单机多 agent；同一局域网内配对的机器 | 跨机器、跨组织 |
 | 传输 | 本地 socket + JSONL 日志 | Cloudflare Workers + Durable Objects |
 | 协作能力 | 本地频道、统一花名册、直投、空闲通知 | 定向投递、租约、在线状态、任务看板、Web 界面 |
 

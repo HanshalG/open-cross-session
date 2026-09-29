@@ -20,7 +20,16 @@ import {
   isCodexThreadId,
   listCodexSessions,
 } from "./codex-sessions.ts";
+import {
+  deliverDm,
+  deliverToCodexTask,
+  type DeliverySink,
+  type StoredDeliveryFailure,
+} from "./deliver.ts";
 import { detectLang, messages } from "./i18n.ts";
+import { lanMessages } from "./i18n-lan.ts";
+import { LAN_DAEMON_COMMAND, runLanDaemon } from "./lan-daemon.ts";
+import { cmdLan, lanDm, lanPeerCount, printLanWho, type LanCliContext, type LanDmSender } from "./lan-cli.ts";
 import {
   identityCursorConsumer,
   inboxCursorState,
@@ -41,6 +50,7 @@ import {
   formatDuration,
   IDLE_WATCH_COMMAND,
   pendingIdleSubscriptions,
+  selfCommand,
   resolveIdleSubscriber,
   runIdleWatch,
   spawnIdleWatcher,
@@ -54,12 +64,12 @@ import {
   readMessages,
   readRoutedMessages,
   NAME_RE,
+  OCS_IDENTITY_RE,
 } from "./store.ts";
 import {
   buildRoster,
   canonicalWakeAddress,
   dmChannel,
-  findCodexCmuxSurface,
   findDmReplyChannel,
   resolveDmTarget,
   resolveSelfName,
@@ -69,7 +79,6 @@ import {
   shadowFreeWorkspaceAlias,
   CODEX_THREAD_ID_ENV,
   OCS_NAME_ENV,
-  wakeCmuxSurface,
 } from "./roster.ts";
 import {
   claudeShortId,
@@ -83,20 +92,14 @@ import {
 } from "./names.ts";
 import { verifiedClaudeWorkspaceIdentity } from "./workspace-registry.ts";
 import {
-  codexHosts,
   codexQueueSupported,
-  codexThreadLivePid,
-  psTable,
-  queueCodexThread,
 } from "./codex-queue.ts";
 import {
   findSelfClaudePid,
   selectWakeTargets,
   splitWakeMentions,
-  wakeCodexTask,
   wakeNote,
   wakeSessions,
-  type WakeNoteInput,
 } from "./wake.ts";
 import {
   checkUpgrade,
@@ -106,10 +109,11 @@ import {
   upgradeCheckEnabled,
 } from "./upgrade.ts";
 
-export const OCS_VERSION = "0.5.1";
+export const OCS_VERSION = "0.6.0";
 
 const LANG = detectLang();
 const M = messages(LANG);
+const L = lanMessages(LANG);
 
 interface Parsed {
   positional: string[];
@@ -139,7 +143,15 @@ const COMMAND_SPECS: Record<string, CommandSpec> = {
   "notify-when-idle": { value: [], bool: [], minPos: 1, maxPos: 1 },
   /** 内部：脱离终端的 idle watcher 入口（不进 help）。 */
   [IDLE_WATCH_COMMAND]: { value: [], bool: [], minPos: 1, maxPos: 1 },
-  who: { value: [], bool: ["json", "verbose"], minPos: 0, maxPos: 0 },
+  who: { value: [], bool: ["json", "verbose", "lan"], minPos: 0, maxPos: 0 },
+  lan: {
+    value: ["port", "bind", "name", "addr", "label"],
+    bool: ["json", "no-discover", "discover"],
+    minPos: 0,
+    maxPos: 3,
+  },
+  /** 内部：局域网守护进程入口（不进 help）。 */
+  [LAN_DAEMON_COMMAND]: NO_ARGS,
   whoami: { value: ["session"], bool: ["json"], minPos: 0, maxPos: 0 },
   rename: { value: [], bool: ["force", "clear"], minPos: 0, maxPos: 1 },
   sessions: NO_ARGS,
@@ -228,8 +240,6 @@ function fail(message: string): never {
   process.exit(1);
 }
 
-type StoredDeliveryFailure = "failed" | "unknown";
-
 /**
  * The channel append is already committed when wake delivery runs. Preserve
  * that distinction in the process status so automation can stop without
@@ -239,6 +249,8 @@ function markStoredDeliveryFailure(outcome: StoredDeliveryFailure): void {
   const code = outcome === "unknown" ? 3 : 2;
   process.exitCode = Math.max(Number(process.exitCode ?? 0), code);
 }
+
+const CLI_SINK: DeliverySink = { log: (line) => console.log(line), fail: markStoredDeliveryFailure };
 
 /** Resolve the full UUID or the exact short address printed by `ocs who`. */
 function resolveCodexFlagAddress(flag: "codex" | "codex-source", value: string): string {
@@ -251,130 +263,6 @@ function resolveCodexFlagAddress(flag: "codex" | "codex-source", value: string):
     return resolved.threadId;
   }
   fail(M.failCodexAddress(flag, value));
-}
-
-/**
- * #30：Desktop 明确没有投递时，若同一个 task 仍运行在唯一可验证的 cmux Codex surface，
- * 用同一条已落盘消息的 channel/seq 唤醒它。unknown-outcome 绝不能走这里，避免重复投递。
- */
-function tryCodexCmuxFallback(
-  targetThreadId: string,
-  reason: string,
-  wakeInput: Omit<WakeNoteInput, "receiver">,
-): boolean {
-  if (reason !== "unavailable" && reason !== "not-open" && reason !== "no-source") return false;
-  const surface = findCodexCmuxSurface(targetThreadId);
-  if (surface === null) return false;
-  const result = wakeCmuxSurface(
-    surface.ref,
-    wakeNote({
-      ...wakeInput,
-      receiver: `codex-${targetThreadId.slice(0, 8)}`,
-      implicitReceiver: true,
-    }),
-  );
-  if (!result.ok) return false;
-  console.log(M.codexCmuxFallback(targetThreadId, reason, surface.ref));
-  return true;
-}
-
-/**
- * codex 目标的统一投递阶梯（消息此前已落盘，这里只负责唤醒）:
- *   1. `codex queue --thread` —— 官方 CLI 表面，按 thread 精确寻址，终端 TUI / Desktop 通吃，
- *      不需要 cmux，也不需要目标被 renderer 认领。先用 rollout fd 证明目标活着才发
- *      （queue 对死会话照样 exit=0，见 codex-queue.ts 的送达语义）。
- *   2. ChatGPT Desktop IPC —— 私有协议（铁律 5），保留作降级。
- *   3. cmux 按键注入 —— 最后兜底。
- * unknown-outcome 在任一层都立即停止：帧可能已写出，绝不重放（铁律 5）。
- * 返回 false 表示三层都没投出去，调用方按「仅落盘」处理。
- */
-async function deliverToCodexTask(
-  targetThreadId: string,
-  wakeInput: Omit<WakeNoteInput, "receiver">,
-  sourceThreadId?: string,
-): Promise<boolean> {
-  // 自我唤醒防回环：Claude（findSelfClaudePid）和 Pi（piWakeSelfSkipped）两条路都有，
-  // codex 一直缺——以前 Desktop IPC 前置条件多不易触发，`codex queue` 又快又稳之后
-  // 一个 @ 到自己的会话会把自己反复唤醒。
-  const selfThreadId = process.env[CODEX_THREAD_ID_ENV];
-  if (typeof selfThreadId === "string" && selfThreadId.toLowerCase() === targetThreadId.toLowerCase()) {
-    console.log(M.codexWakeSelfSkipped(targetThreadId));
-    return true;
-  }
-  const ps = psTable();
-  const livePid = codexThreadLivePid(targetThreadId, process.env, ps);
-  // 载体按宿主选，不是一律 queue：
-  //   * Desktop 托管的 task —— 先走 Desktop IPC。两条路都能送达并触发新 turn，但 IPC 在
-  //     rollout 里留的是 `send_message_to_thread` + `<codex_delegation><source_thread_id>`
-  //     原生来源信封，queue 留下的是普通 `UserMessage`——会把别的 agent 发来的消息呈现成
-  //     「用户自己敲的」。跨会话内容必须看得出是数据而不是用户指令（Claude 侧用原生
-  //     "Message from X" 包装是同一个理由），所以 Desktop 上不拿来源换便利。
-  //   * 其它宿主（终端 TUI）—— IPC 根本够不着，queue 是唯一的路。
-  const desktopHosted = livePid !== null && codexHosts([livePid], process.env, ps).get(livePid)?.app === "ChatGPT";
-  if (livePid !== null && !desktopHosted) {
-    const queued = queueCodexThread({
-      threadId: targetThreadId,
-      livePid,
-      prompt: wakeNote({
-        ...wakeInput,
-        receiver: `codex-${targetThreadId.slice(0, 8)}`,
-        implicitReceiver: true,
-      }),
-    });
-    if (queued.ok) {
-      console.log(M.codexQueued(queued.threadId, queued.pid, queued.messageId));
-      return true;
-    }
-    if (queued.reason === "unknown-outcome") {
-      console.log(M.codexUnknownOutcome(queued.detail ?? ""));
-      markStoredDeliveryFailure("unknown");
-      return true; // 已上报，不再往下投，避免重复送达
-    }
-    console.log(M.codexQueueSkipped(targetThreadId, queued.reason, queued.detail ?? ""));
-  }
-  const result = await wakeCodexTask({
-    targetThreadId,
-    ...(sourceThreadId !== undefined ? { sourceThreadId } : {}),
-    ...wakeInput,
-  });
-  if (result.ok) {
-    console.log(M.codexAccepted(result.targetThreadId, result.turnId));
-    return true;
-  }
-  if (result.reason === "unknown-outcome") {
-    console.log(M.codexUnknownOutcome(result.detail ?? ""));
-    markStoredDeliveryFailure("unknown");
-    return true;
-  }
-  if (tryCodexCmuxFallback(targetThreadId, result.reason, wakeInput)) {
-    // cmux 只复用同一 channel/seq 做唤醒，没有再次落盘。
-    return true;
-  }
-  // Desktop 托管但 IPC 投不进（没被 renderer 认领等）时，queue 仍是可用的最后一级：
-  // 丢掉原生来源信封总好过完全投不到——正文里本来就带着 `[ocs wake] X mentioned you`。
-  if (desktopHosted && livePid !== null) {
-    const queued = queueCodexThread({
-      threadId: targetThreadId,
-      livePid,
-      prompt: wakeNote({
-        ...wakeInput,
-        receiver: `codex-${targetThreadId.slice(0, 8)}`,
-        implicitReceiver: true,
-      }),
-    });
-    if (queued.ok) {
-      console.log(M.codexQueued(queued.threadId, queued.pid, queued.messageId));
-      return true;
-    }
-    if (queued.reason === "unknown-outcome") {
-      console.log(M.codexUnknownOutcome(queued.detail ?? ""));
-      markStoredDeliveryFailure("unknown");
-      return true;
-    }
-  }
-  console.log(M.codexFailed(result.reason, result.detail ?? ""));
-  markStoredDeliveryFailure("failed");
-  return false;
 }
 
 function printMessage(m: { seq: number; ts: string; from: string; body: string }): void {
@@ -486,7 +374,7 @@ async function cmdSend(parsed: Parsed): Promise<void> {
     lang: LANG,
   };
   for (const target of codexTargets) {
-    await deliverToCodexTask(target, wakeInput, codexSource);
+    await deliverToCodexTask(target, wakeInput, M, CLI_SINK, codexSource);
   }
 
   // Pi 侧：全局扩展登记活 TUI，并经私有 UDS 收件箱注入。忙碌时由 Pi 自己排成 follow-up。
@@ -562,10 +450,54 @@ async function cmdSend(parsed: Parsed): Promise<void> {
   if (idleSubscriber !== null) subscribeIdle(idleSubscriber, selection.targets);
 }
 
+function lanContext(parsed: Parsed): LanCliContext {
+  return {
+    lang: LANG,
+    version: OCS_VERSION,
+    positional: parsed.positional,
+    flags: parsed.flags,
+    fail,
+    markStored: markStoredDeliveryFailure,
+    selfCommand: selfCommand(),
+  };
+}
+
+/**
+ * 跨机 DM 的发送方地址：宿主会话给 ocs 名字（对方回复用）和不变短 id（频道派生用）；
+ * `--as` / OCS_NAME 显式指定时两者都是那个名字。
+ */
+function lanDmSender(parsed: Parsed, from: string): LanDmSender {
+  const pinned = process.env[OCS_NAME_ENV];
+  const explicit = parsed.flags.has("as") || (typeof pinned === "string" && NAME_RE.test(pinned));
+  const owner = explicit ? null : selfNameOwner();
+  if (owner !== null) {
+    const id = owner.kind === "claude" ? claudeShortId(owner.session.sessionId) : ownerShortId(owner);
+    const name = ocsNameFor(owner, listOcsNames())?.name ?? null;
+    const identity = owner.kind === "claude"
+      ? claudeSessionIdentity(owner.session)
+      : `${owner.kind}:${owner.id.toLowerCase()}`;
+    return {
+      display: name ?? id ?? from,
+      key: id ?? from,
+      logFrom: from,
+      identity: OCS_IDENTITY_RE.test(identity) ? identity : null,
+    };
+  }
+  return { display: from, key: from, logFrom: from, identity: selfIdentity(from) };
+}
+
 async function cmdDm(parsed: Parsed): Promise<void> {
   const [target, ...bodyParts] = parsed.positional;
   if (target === undefined || bodyParts.length === 0) fail(M.failDmUsage);
   const from = senderName(parsed);
+  // `<地址>@<对端>`：NAME_RE 里没有 '@'，本机地址不可能长这样，分流无歧义。
+  if (target.includes("@")) {
+    for (const flag of ["notify-when-idle", "inherit"]) {
+      if (parsed.flags.has(flag)) fail(L.dmFlagUnsupported(flag));
+    }
+    await lanDm(lanContext(parsed), target, bodyParts.join(" "), lanDmSender(parsed, from));
+    return;
+  }
   // 订阅方在任何 workspace 索引 / 频道写入前就要确定：失败必须保持零落盘。
   const idleSubscriber = parsed.flags.has("notify-when-idle") ? requireIdleSubscriber() : null;
   let resolved: ReturnType<typeof resolveDmTarget>;
@@ -690,63 +622,16 @@ async function cmdDm(parsed: Parsed): Promise<void> {
   console.log(M.dmSent(target, channel, message.seq));
   const wakeInput = { channel, seq: message.seq, from, body: message.body, lang: LANG };
 
-  if (resolved.kind === "claude") {
-    if (resolved.claude === undefined) {
-      // 目标此刻不在线：一次性会话名重启后不会主动读这条频道，文案不许暗示会自动送达。
-      console.log(
-        stableChannel === undefined
-          ? (message.seq === 1 ? M.dmParkedNew(target, channel) : M.dmParked(target, channel))
-          : M.dmParkedStable(target, channel),
-      );
-      if (idleSubscriber !== null) subscribeIdle(idleSubscriber, []);
-      return;
-    }
-    const [outcome] = await wakeSessions([resolved.claude], {
-      ...wakeInput,
-      ...(replyTarget !== null ? { dmReplyTarget: replyTarget } : {}),
-    });
-    const label = `${resolved.claude.name ?? "?"}(pid ${resolved.claude.pid})`;
-    if (outcome!.result.ok) console.log(M.wakeDelivered(label));
-    else {
-      console.log(M.wakeFailed(label, outcome!.result.reason));
-      markStoredDeliveryFailure("failed");
-    }
-    if (idleSubscriber !== null) subscribeIdle(idleSubscriber, [resolved.claude]);
-  } else if (resolved.kind === "codex-task" && resolved.threadId !== undefined) {
-    await deliverToCodexTask(resolved.threadId, wakeInput);
-    if (idleSubscriber !== null) subscribeIdle(idleSubscriber, []);
-  } else if (resolved.kind === "pi" && resolved.piSessionId !== undefined) {
-    if (resolved.piSession === undefined) {
-      console.log(M.dmPiParked(target, channel));
-      if (idleSubscriber !== null) subscribeIdle(idleSubscriber, []);
-      return;
-    }
-    const result = await wakePiSession(
-      resolved.piSession,
-      wakeNote({ ...wakeInput, receiver: resolved.name, implicitReceiver: true }),
-    );
-    if (result.ok) console.log(M.piWakeAccepted(resolved.name));
-    else if (result.reason === "unknown-outcome") {
-      console.log(M.piWakeUnknownOutcome(resolved.name, result.detail ?? ""));
-      markStoredDeliveryFailure("unknown");
-    } else {
-      console.log(M.piWakeFailed(resolved.name, result.reason, result.detail ?? ""));
-      markStoredDeliveryFailure("failed");
-    }
-    if (idleSubscriber !== null) subscribeIdle(idleSubscriber, []);
-  } else if (resolved.kind === "cmux" && resolved.cmuxRef !== undefined) {
-    // cmux surface 没有 ocs 名字：Reply:/Thread: 的 --as 用 dm 同款派生名 surface-N。
-    const result = wakeCmuxSurface(resolved.cmuxRef, wakeNote({ ...wakeInput, receiver: resolved.name }));
-    if (result.ok) console.log(M.dmCmuxWoken(result.ref));
-    else if (result.reason === "busy") {
-      console.log(M.dmCmuxBusy(resolved.cmuxRef));
-      markStoredDeliveryFailure("failed");
-    } else {
-      console.log(M.dmCmuxFailed(resolved.cmuxRef, result.detail ?? result.reason));
-      markStoredDeliveryFailure("failed");
-    }
-    if (idleSubscriber !== null) subscribeIdle(idleSubscriber, []);
-  }
+  const woken = await deliverDm({
+    resolved,
+    target,
+    channel,
+    firstMessage: message.seq === 1,
+    stableChannel: stableChannel !== undefined,
+    wakeInput,
+    dmReplyTarget: replyTarget,
+  }, M, CLI_SINK);
+  if (idleSubscriber !== null) subscribeIdle(idleSubscriber, woken === null ? [] : [woken]);
 }
 
 async function cmdNotifyWhenIdle(parsed: Parsed): Promise<void> {
@@ -796,6 +681,17 @@ function cmdInbox(parsed: Parsed): void {
 }
 
 async function cmdWho(parsed: Parsed): Promise<void> {
+  await cmdWhoLocal(parsed);
+  if (parsed.flags.has("json")) return;
+  if (parsed.flags.has("lan")) {
+    await printLanWho({ lang: LANG, fail });
+    return;
+  }
+  const peers = lanPeerCount();
+  if (peers > 0) console.log(L.whoHint(peers));
+}
+
+async function cmdWhoLocal(parsed: Parsed): Promise<void> {
   const roster = buildRoster();
   const json = parsed.flags.has("json");
   if (roster.entries.length === 0 && !json) {
@@ -1250,6 +1146,8 @@ ocs notify-when-idle <name>      # one-shot: notice here when <name> next goes i
 ocs dm <name> "<text>" --notify-when-idle      # send, then subscribe (also on send)
 ocs rename <name> [--force] | --clear   # give THIS session a memorable address
 ocs whoami [--json] | sessions | watch <channel> | doctor [--fix] | version
+ocs who --lan                    # agents on paired machines in the same LAN
+ocs dm <address>@<peer> "<text>" # message + wake an agent on a paired machine
 \`\`\`
 
 - Your own identity is auto-detected inside Claude, Codex, and Pi sessions; \`--as <name>\` overrides.
@@ -1308,6 +1206,10 @@ ocs whoami [--json] | sessions | watch <channel> | doctor [--fix] | version
 - After a restart, \`ocs inbox\` lists only unread threads that can be proven to
   belong to the current stable identity. It never guesses by scanning private
   DM names; \`ocs read <channel>\` advances the same stable cursor.
+- LAN (opt-in): \`<address>@<peer>\` reaches an agent on another machine the user paired
+  with \`ocs lan pair\`. A wake note from such a sender shows \`x@peer\` and its \`Reply:\` line
+  already routes back. Only run \`ocs lan up\` / \`ocs lan pair\` when the user asks: pairing lets
+  that machine prompt this machine's agents. Never pass a pairing code on to anyone else.
 - \`ocs doctor --fix\` is the one-step setup repair: it refreshes the Claude,
   Codex, and Pi skills, repairs the Pi extension and local data permissions,
   and backs up Claude settings before enabling direct delivery.
@@ -1434,6 +1336,12 @@ async function main(): Promise<void> {
       break;
     case "who":
       await cmdWho(parsed);
+      break;
+    case "lan":
+      await cmdLan(lanContext(parsed));
+      break;
+    case LAN_DAEMON_COMMAND:
+      await runLanDaemon(OCS_VERSION, LANG);
       break;
     case "whoami":
       cmdWhoami(parsed);

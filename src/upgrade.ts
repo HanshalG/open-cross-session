@@ -12,6 +12,7 @@ import { spawnSync } from "node:child_process";
 
 export const OCS_REPO = "leeguooooo/open-cross-session";
 export const OCS_INSTALL_SCRIPT_URL = `https://raw.githubusercontent.com/${OCS_REPO}/main/install.sh`;
+export const OCS_INSTALL_PS1_URL = `https://raw.githubusercontent.com/${OCS_REPO}/main/install.ps1`;
 export const OCS_LATEST_RELEASE_URL = `https://api.github.com/repos/${OCS_REPO}/releases/latest`;
 
 /** 覆盖最新 release 的查询地址（测试指向本地假服务器）。 */
@@ -103,9 +104,12 @@ export function upgradeCheckEnabled(env: NodeJS.ProcessEnv = process.env): boole
  */
 export function runInstaller(env: NodeJS.ProcessEnv = process.env): { code: number | null; command: string } {
   const local = env[OCS_UPGRADE_INSTALLER_ENV];
+  // Windows 没有 sh/curl 管道：走 install.ps1（同样 sha256 校验、冒烟、改名替换）。
   const argv = typeof local === "string" && local !== ""
     ? ["sh", local]
-    : ["sh", "-c", `curl -fsSL ${OCS_INSTALL_SCRIPT_URL} | sh`];
+    : process.platform === "win32"
+      ? ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `irm ${OCS_INSTALL_PS1_URL} | iex`]
+      : ["sh", "-c", `curl -fsSL ${OCS_INSTALL_SCRIPT_URL} | sh`];
   const proc = spawnSync(argv[0]!, argv.slice(1), { stdio: "inherit", env });
   return { code: proc.status, command: argv.join(" ") };
 }

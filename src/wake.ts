@@ -70,6 +70,21 @@ export function truncateUtf8(text: string, maxBytes: number): string {
   return buf.subarray(0, end).toString("utf8");
 }
 
+const PROTOCOL_LINE_RE = /^(\s*)(Reply:|Thread:|回复：|线程：|\[ocs wake\]|\[ocs 唤醒\]|\[Cross-session idle notice\]|\[跨会话空闲通知\])/gm;
+
+/**
+ * 正文是对方可控的数据（跨机 DM 之后更是网络另一端可控），不能让它冒充包装与骨架：
+ * - `<cross-session-message` / `</cross-session-message` 的 `<` 换成 `‹`，正文闭合不了包装标签，
+ *   也开不出一个伪造 from-name 的新标签（Codex queue / Pi / cmux 没有包装，同样适用）；
+ * - 行首形似 `Reply:` / `Thread:` / 唤醒首行 / 空闲通知的行前加 `> `，伪造不了回复命令。
+ * 其余字节原样保留（协议 §1「逐字」在这两处例外，见 docs/wake-protocol.md）。
+ */
+export function neutralizeWakeBody(body: string): string {
+  return body
+    .replace(/<(\/?)(cross-session-message)/gi, "‹$1$2")
+    .replace(PROTOCOL_LINE_RE, "$1> $2");
+}
+
 export function wakeReplyCommand(
   channel: string,
   receiver: string,
@@ -110,9 +125,11 @@ export function wakeNote(input: WakeNoteInput): string {
     ? wakeDmReplyCommand(input.dmReplyTarget!)
     : wakeReplyCommand(input.channel, input.receiver, input.seq, implicitReceiver);
   const total = Buffer.byteLength(input.body, "utf8");
-  const bodyPart = total <= WAKE_BODY_INLINE_MAX_BYTES
-    ? input.body
-    : `${truncateUtf8(input.body, WAKE_BODY_PREVIEW_BYTES)}\n… (${total} bytes total; full text: ${read})`;
+  const safe = neutralizeWakeBody(input.body);
+  // 上限按中和后的字节数判：中和最多每处加 2 字节，不许因此把整条 note 顶出 5120。
+  const bodyPart = Buffer.byteLength(safe, "utf8") <= WAKE_BODY_INLINE_MAX_BYTES
+    ? safe
+    : `${truncateUtf8(safe, WAKE_BODY_PREVIEW_BYTES)}\n… (${total} bytes total; full text: ${read})`;
   const tail = `\n\n${M.wakeNoteReply(reply)}\n${M.wakeNoteThread(read)}`;
   const ladder: Array<{ sender: string | null; ago?: string }> = [
     { sender: input.from, ...(input.ago !== undefined ? { ago: input.ago } : {}) },
@@ -206,7 +223,18 @@ export function selfPidFromEnv(env: NodeJS.ProcessEnv = process.env): number | n
   const sock = env[CLAUDE_MESSAGING_SOCKET_ENV];
   if (typeof sessionId !== "string" || sessionId === "" || typeof sock !== "string" || sock === "") return null;
   const match = /(\d+)\.sock$/.exec(basename(sock));
-  if (match === null) return null;
+  if (match === null) {
+    // Windows：收件箱是命名管道 `\\.\pipe\LOCAL\cc-msg-<hex>`，文件名里没有 pid。改为在会话目录里找
+    // sessionId 与管道路径都和环境变量一致的那一条（listNativeSessions 已过滤死 pid）；
+    // 多条或零条都不认。管道名大小写不敏感。
+    const same = (a: string, b: string) => process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
+    const hits = listNativeSessions(env).filter((session) =>
+      session.sessionId !== null &&
+      session.sessionId.toLowerCase() === sessionId.toLowerCase() &&
+      same(session.messagingSocketPath, sock)
+    );
+    return hits.length === 1 ? hits[0]!.pid : null;
+  }
   const pid = Number(match[1]);
   const resolved = resolveSessionSocketByPid(pid, { expectSessionId: sessionId, env }); // 含 pid 活 + sessionId 比对
   if (!resolved.ok) return null;
