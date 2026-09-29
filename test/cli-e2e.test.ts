@@ -237,6 +237,38 @@ describe("inbox 离线续接", () => {
     }
   }, T);
 
+  test("inbox --session：不在 Claude 进程树里也能按 sessionId 查指定会话的未读", async () => {
+    const f = fixture();
+    try {
+      appendMessage({
+        channel: "dm-peer-inbox",
+        from: "tester",
+        from_identity: "name:tester",
+        to_identity: "name:worker-a",
+        body: "for the peer",
+        env: f.env,
+      });
+      // 调用方自己是 tester；--session 指向对端 peer-sess（worker-a），看到的是对端的收件箱。
+      const peer = await run(f, ["inbox", "--json", "--session", "peer-sess"]);
+      expect({ code: peer.code, stderr: peer.stderr }).toEqual({ code: 0, stderr: "" });
+      const threads = JSON.parse(peer.stdout);
+      expect(Array.isArray(threads)).toBe(true);
+      expect(threads.map((t: { channel: string }) => t.channel)).toEqual(["dm-peer-inbox"]);
+      expect(threads[0].unread).toBe(1);
+      // 自己的收件箱不受影响。
+      expect(JSON.parse((await run(f, ["inbox", "--json"])).stdout)).toEqual([]);
+
+      const unknown = await run(f, ["inbox", "--json", "--session", "nope"]);
+      expect(unknown.code).toBe(1);
+      expect(unknown.stderr).toContain("nope");
+      const both = await run(f, ["inbox", "--session", "peer-sess", "--as", "x"]);
+      expect(both.code).toBe(1);
+      expect(both.stderr).toContain("--session");
+    } finally {
+      f.close();
+    }
+  }, T);
+
   test("发送方 cursor 写失败不把已落盘 DM 伪装成发送失败", async () => {
     const f = fixture();
     try {

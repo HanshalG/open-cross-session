@@ -115,7 +115,7 @@ import {
   upgradeCheckEnabled,
 } from "./upgrade.ts";
 
-export const OCS_VERSION = "0.6.5";
+export const OCS_VERSION = "0.6.6";
 
 const LANG = detectLang();
 const M = messages(LANG);
@@ -144,7 +144,7 @@ const COMMAND_SPECS: Record<string, CommandSpec> = {
     maxPos: null,
   },
   dm: { value: ["as", "inherit"], bool: ["notify-when-idle"], minPos: 2, maxPos: null },
-  inbox: { value: ["as"], bool: ["json"], minPos: 0, maxPos: 0 },
+  inbox: { value: ["as", "session"], bool: ["json"], minPos: 0, maxPos: 0 },
   read: { value: ["as", "since"], bool: ["json", "peek", "include-self"], minPos: 1, maxPos: 1 },
   "notify-when-idle": { value: [], bool: [], minPos: 1, maxPos: 1 },
   /** 内部：脱离终端的 idle watcher 入口（不进 help）。 */
@@ -183,20 +183,33 @@ function senderName(parsed: Parsed): string {
   fail(M.failNoSelfName);
 }
 
-function currentInboxIdentity(parsed: Parsed, primaryName: string): InboxIdentityContext {
+/**
+ * `pinned` 是 `--session` 指定的 Claude 会话：调用方（状态栏守护进程等）不在 Claude 的进程树里，
+ * 不能靠祖先链识别，就按 sessionId 直接解析，$OCS_NAME 也不参与。
+ */
+function currentInboxIdentity(
+  parsed: Parsed,
+  primaryName: string,
+  pinned?: NativeClaudeSession,
+): InboxIdentityContext {
   const identities = new Set([selfIdentity(primaryName)]);
   const mentionNames = new Set([primaryName]);
   const pinnedName = process.env[OCS_NAME_ENV];
-  const explicit = parsed.flags.has("as") ||
-    (typeof pinnedName === "string" && NAME_RE.test(pinnedName));
+  const explicit = pinned === undefined && (parsed.flags.has("as") ||
+    (typeof pinnedName === "string" && NAME_RE.test(pinnedName)));
   if (!explicit) {
     const names = listOcsNames();
-    const owner = selfNameOwner();
+    const owner: NameOwner | null = pinned !== undefined ? { kind: "claude", session: pinned } : selfNameOwner();
     const own = owner === null ? null : ocsNameFor(owner, names);
     if (own !== null) mentionNames.add(own.name);
-    const selfPid = findSelfClaudePid();
     const sessions = listNativeSessions();
-    const session = selfPid === null ? undefined : sessions.find((candidate) => candidate.pid === selfPid);
+    let session: NativeClaudeSession | undefined;
+    if (pinned !== undefined) {
+      session = pinned;
+    } else {
+      const selfPid = findSelfClaudePid();
+      session = selfPid === null ? undefined : sessions.find((candidate) => candidate.pid === selfPid);
+    }
     if (session?.name === primaryName) {
       identities.add(claudeSessionIdentity(session));
       const alias = shadowFreeWorkspaceAlias(session, sessions, names);
@@ -669,8 +682,19 @@ async function cmdNotifyWhenIdle(parsed: Parsed): Promise<void> {
 }
 
 function cmdInbox(parsed: Parsed): void {
-  const name = senderName(parsed);
-  const context = currentInboxIdentity(parsed, name);
+  const sessionFlag = parsed.flags.get("session");
+  let pinned: NativeClaudeSession | undefined;
+  let name: string;
+  if (typeof sessionFlag === "string") {
+    if (parsed.flags.has("as")) fail(M.failInboxSessionWithAs);
+    pinned = listNativeSessions().find((candidate) => candidate.sessionId === sessionFlag);
+    if (pinned === undefined) fail(M.whoamiSessionNotFound(sessionFlag));
+    if (pinned.name === null) fail(M.whoamiSessionNotFound(sessionFlag));
+    name = pinned.name;
+  } else {
+    name = senderName(parsed);
+  }
+  const context = currentInboxIdentity(parsed, name, pinned);
   const threads = listInboxThreads(context);
   if (parsed.flags.has("json")) {
     console.log(JSON.stringify(threads, null, 2));

@@ -154,6 +154,7 @@ interface Catalog {
   dmCmuxFailed: (ref: string, detail: string) => string;
   whoamiUnknown: string;
   whoamiSessionNotFound: (sessionId: string) => string;
+  failInboxSessionWithAs: string;
   whoRenameHint: string;
   dmNameResolved: (requested: string, current: string) => string;
   dmNameAmbiguous: (target: string, candidates: string[]) => string;
@@ -188,8 +189,9 @@ Usage:
   ocs dm <name-or-id> <text> [--as <name>] [--inherit <old-dm-channel>] [--notify-when-idle]
       Message + wake one agent. Channel is auto-derived; nothing to set up.
       --inherit binds one pre-v0.3.4 DM history channel; both Claude workspaces must be live and unique.
-  ocs inbox [--as <name>] [--json]
+  ocs inbox [--as <name> | --session <claude-session-id>] [--json]
       List unread threads attributable to this identity; reading still uses the existing ocs read command.
+      --session resolves one Claude session by id (for status bars outside Claude's process tree).
   ocs send <channel> <body> [--as <name>] [--reply-to <seq>] [--no-wake]
            [--notify-when-idle] [--codex <thread-id|codex-8hex>]
            [--codex-source <thread-id|codex-8hex>]
@@ -428,6 +430,7 @@ Local ocs and hosted party coexist fine: your machine and your LAN (\`ocs lan\`)
   whoamiUnknown:
     "cannot tell who you are: not inside a registered Claude/Codex/Pi session, and OCS_NAME is unset. Pass --as <name> or export OCS_NAME",
   whoamiSessionNotFound: (sessionId) => `no live Claude session has sessionId ${sessionId}`,
+  failInboxSessionWithAs: "--session and --as pick the identity in different ways; use one",
   whoRenameHint: "tip: `ocs rename <name>` gives this session a memorable address (its id keeps working too)",
   dmNameResolved: (requested, current) => `resolved ${requested} → ${current}`,
   dmNameAmbiguous: (target, candidates) =>
@@ -469,8 +472,9 @@ const zh: Catalog = {
   ocs dm <名字或id> <内容> [--as <name>] [--inherit <旧dm频道>] [--notify-when-idle]
       给一个 agent 发消息并唤醒；频道自动派生，什么都不用建
       --inherit 一次性绑定 v0.3.4 之前的 DM 历史；双方 Claude 工作区必须在线且唯一
-  ocs inbox [--as <name>] [--json]
+  ocs inbox [--as <name> | --session <claude-session-id>] [--json]
       列出能可靠归属给当前身份的未读线程；读取仍复用现有 ocs read 命令
+      --session 按 id 解析指定 Claude 会话（给不在 Claude 进程树里的状态栏用）
   ocs send <channel> <body> [--as <name>] [--reply-to <seq>] [--no-wake]
            [--notify-when-idle] [--codex <thread-id|codex-8hex>]
            [--codex-source <thread-id|codex-8hex>]
@@ -693,6 +697,7 @@ ${lanMessages("zh").help}
   dmCmuxFailed: (ref, detail) => `cmux 唤醒 ${ref} 失败: ${detail}`,
   whoamiUnknown: "认不出你是谁：不在已登记的 Claude/Codex/Pi 会话里，OCS_NAME 也没设。用 --as <name> 或 export OCS_NAME",
   whoamiSessionNotFound: (sessionId) => `没有 sessionId 为 ${sessionId} 的活 Claude 会话`,
+  failInboxSessionWithAs: "--session 和 --as 是两种指定身份的方式，只能用一个",
   whoRenameHint: "提示：`ocs rename <名字>` 给当前会话起个好记的地址（原 id 照样能用）",
   dmNameResolved: (requested, current) => `已解析 ${requested} → ${current}`,
   dmNameAmbiguous: (target, candidates) =>

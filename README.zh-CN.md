@@ -177,7 +177,7 @@ fail closed，IPC 结果未知时绝不降级。没有安全载体时，消息�
 | `ocs whoami` | 看自动识别出的发送者身份；`--json [--session <id>]` 描述宿主会话（`{host, id, name, session, addresses}`） |
 | `ocs rename <名字>` | 给当前会话起个好记的地址，短 id 照样能用。`--force` 接管别的会话占着的名字；`--clear` 删掉 |
 | `ocs dm <名字或id> <内容>` | 直发并唤醒一个 agent；唯一 Claude 工作区重启后继续使用同一频道。`--inherit <旧dm频道>` 一次性绑定 v0.3.4 前的历史；`--notify-when-idle` |
-| `ocs inbox` | 只列能安全归属给当前身份的未读线程；`--json` 供自动化使用 |
+| `ocs inbox` | 只列能安全归属给当前身份的未读线程；`--json` 供自动化使用，`--session <claude-session-id>` 按 id 解析指定 Claude 会话（给不在 Claude 进程树里的状态栏用） |
 | `ocs send <ch> <body>` | 追加消息，`@` 触发唤醒，`--reply-to <seq>` 同时唤醒那条的作者；`--as` 只用于覆盖自动身份。`--codex` 与 `--codex-source` 接受完整 thread ID，也接受 `ocs who` 给出的唯一 `codex-<8hex>` 短地址。另支持 `--no-wake`、`--notify-when-idle` |
 | `ocs read <ch>` | 从游标读新消息并推进。自己发的折叠成一行（`--include-self` 完整显示；`--json` 带 `self`）；`--as` 覆盖身份。另支持 `--since`、`--peek` |
 | `ocs notify-when-idle <名字>` | 一次性：那个 Claude 会话下次空闲或退出时，你的会话收到一条 `[跨会话空闲通知]`（已空闲则立即；6 小时后过期） |

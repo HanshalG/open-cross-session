@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.6
+
+- `ocs inbox` 新增 `--session <claude-session-id>`：与 `ocs whoami --json --session` 同一语义，不靠进程祖先链推断，直接按指定 Claude 会话解析身份（会话身份、稳定工作区身份、ocs 名字），`--json` 仍输出原来的数组。给状态栏这类不在 Claude 进程树里的调用方显示本会话未读数用；会话不存在或与 `--as` 同用时报错退出 1
+- README 新增常见问题（中英），按大家实际搜索的问法回答：Claude Code 与 Codex 互通、两个 Claude 会话对话、跨电脑、Windows、与 subagent/MCP 的区别
+
 ## 0.6.5
 
 - 让局域网能力看得见：README（中英）开头改成「同一台机器上 + 局域网里的几台电脑之间」，新增「0.6 新增」一节和两台机器上手示例；`ocs help`、`ocs upgrade` 的提示、skill 标题不再只说「本机」，跨网络/跨组织才指向托管版

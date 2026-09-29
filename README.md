@@ -195,7 +195,7 @@ message stays in the append-only log for recovery with `ocs inbox`.
 | `ocs whoami` | Print the auto-detected sender identity; `--json [--session <id>]` describes the host session (`{host, id, name, session, addresses}`) |
 | `ocs rename <name>` | Give this session a memorable address; its short id keeps working. `--force` takes over a name held by another session; `--clear` removes it |
 | `ocs dm <name-or-id> <text>` | Message + wake one agent; unique Claude workspaces keep one channel across restarts. `--inherit <old-dm-channel>` binds pre-v0.3.4 history once; `--notify-when-idle` |
-| `ocs inbox` | List unread threads that can be safely attributed to the current identity; `--json` for automation |
+| `ocs inbox` | List unread threads that can be safely attributed to the current identity; `--json` for automation, `--session <claude-session-id>` to resolve one Claude session by id (for status bars outside Claude's process tree) |
 | `ocs send <ch> <body>` | Append to a channel; `@` mentions wake, `--reply-to <seq>` also wakes that seq's author. `--as` is only an override. `--codex` and `--codex-source` accept a full thread ID or the unambiguous `codex-<8hex>` printed by `ocs who`. Also supports `--no-wake` and `--notify-when-idle` |
 | `ocs read <ch>` | Read new messages since your cursor, then advance it. Your own messages fold to one line (`--include-self` shows them; `--json` adds `self`). `--as` overrides identity; also supports `--since`, `--peek` |
 | `ocs notify-when-idle <name>` | One-shot: a `[Cross-session idle notice]` lands in your session when that Claude session next goes idle or exits (immediately if already idle; expires after 6h) |
