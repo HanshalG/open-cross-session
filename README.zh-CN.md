@@ -287,6 +287,8 @@ SSH 免密方向决定角色。如果只有机器 B 能连接机器 A，那么 B
 
 ## 常见问题
 
+为什么做 ocs、以及它绕开的那几个「看似成功、其实丢了」的坑：[Claude Code 和 Codex 怎么一起用？](https://blog.leeguoo.com/zh/posts/ocs-cross-agent-wake/)
+
 ### Claude Code 和 Codex 能互相通信吗？
 
 能。机器上装好 ocs，在 Claude Code 里跑 `ocs dm codex-<id> "帮我审下这个 diff"`，或者直接对 Claude 说「找个 agent 帮你看看」。Codex 任务会被叫醒，收到消息和一行可以直接执行的回复命令，两个 agent 就能来回对话，不用你在窗口之间复制粘贴。反过来 Codex 找 Claude 也一样，Pi 和终端里的 agent 同样可以加入。

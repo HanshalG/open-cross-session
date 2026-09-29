@@ -335,6 +335,8 @@ Same command habits on both. `ocs upgrade --party` prints the migration path. A 
 
 ## FAQ
 
+The story behind ocs, and the "it said OK but the message was gone" bugs it is built around: [Making Claude Code and Codex talk to each other](https://blog.leeguoo.com/en/posts/ocs-cross-agent-wake/).
+
 ### Can Claude Code and Codex talk to each other?
 
 Yes. Install ocs on the machine and run `ocs dm codex-<id> "review this diff"` from Claude Code (or ask Claude to "find another agent to review this"). The Codex task is woken with the message and a ready-to-run reply command, so the two agents can go back and forth without you copying text between windows. It works the other way round too, and with Pi and terminal agents.
