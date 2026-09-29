@@ -64,6 +64,8 @@ function machine(name: string): Machine {
   const env = cleanEnv({
     [OCS_HOME_ENV]: join(dir, "home"),
     [CLAUDE_NATIVE_SESSIONS_DIR_ENV]: sessionsDir,
+    // 远端 who 会建花名册：别去扫本机真实的 ~/.codex（真 lsof、真 rollout，全量并发时慢且不确定）
+    CODEX_HOME: join(dir, "codex"),
     // 发现只打到本机一个不存在的端口：测试不往真实局域网发组播。
     OCS_LAN_DISCOVERY_TARGETS: "127.0.0.1",
     OCS_LAN_DISCOVERY_PORT: "9",

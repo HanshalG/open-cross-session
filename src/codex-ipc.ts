@@ -16,7 +16,7 @@
  * cross-task label and source link without touching the private app-tools pipe.
  */
 import { randomUUID } from "node:crypto";
-import { lstatSync } from "node:fs";
+import { lstatSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { createConnection, type Socket } from "node:net";
@@ -63,14 +63,33 @@ function object(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** Windows 上 ChatGPT Desktop 的 IPC 是全局命名空间的命名管道（2026-09-29 实测 OpenAI.Codex 26.924）。 */
+export const CODEX_WINDOWS_IPC_PIPE = "\\\\.\\pipe\\codex-ipc";
+
 export function codexDesktopIpcSocketPath(
   env: NodeJS.ProcessEnv = process.env,
 ): string {
+  if (process.platform === "win32") return env.OCS_CODEX_IPC_PIPE?.trim() || CODEX_WINDOWS_IPC_PIPE;
   const codexHome = env.CODEX_HOME?.trim() || join(homedir(), ".codex");
   return join(codexHome, "ipc", "ipc.sock");
 }
 
 export function validateCodexDesktopIpcSocket(path: string): void {
+  if (process.platform === "win32") {
+    // 命名管道没有 uid / mode 可查，访问控制在管道自己的 ACL 上（Desktop 创建）。这里只确认
+    // 管道确实存在，免得对一个不存在的名字空连一次。（ocs 新增，待回流上游）
+    const name = path.replace(/^\\\\\.\\pipe\\/i, "");
+    let pipes: string[];
+    try {
+      pipes = readdirSync("\\\\.\\pipe\\");
+    } catch {
+      throw new CodexDesktopIpcUnavailableError("cannot list named pipes");
+    }
+    if (!pipes.some((pipe) => pipe.toLowerCase() === name.toLowerCase())) {
+      throw new CodexDesktopIpcUnavailableError(`ChatGPT Desktop IPC pipe is missing: ${path}`);
+    }
+    return;
+  }
   let socket;
   let directory;
   try {

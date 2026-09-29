@@ -1,6 +1,6 @@
 ---
 name: ocs
-description: Talk to any other AI coding agent on this machine (Claude Code sessions, Codex tasks, Pi sessions, terminal TUIs) over open-cross-session. Use when asked to discuss with, delegate to, wake, or message another local agent/session, or to check what other agents are running.
+description: Talk to any other AI coding agent on this machine or a paired machine on the same LAN (Claude Code sessions, Codex tasks, Pi sessions, terminal TUIs) over open-cross-session. Use when asked to discuss with, delegate to, wake, or message another agent/session (local, or <address>@<peer> on another computer), or to check what other agents are running.
 ---
 
 # ocs — talk to other local agents
@@ -8,14 +8,25 @@ description: Talk to any other AI coding agent on this machine (Claude Code sess
 Discover who is reachable, then message them. Channels are plumbing — you never
 need to create or manage them.
 
-## Install / upgrade
+## Install
 
 If `ocs` is not on PATH, install the GitHub Release binary (no token needed):
 
     curl -fsSL https://raw.githubusercontent.com/leeguooooo/open-cross-session/main/install.sh | sh
 
-Keep it current: `ocs upgrade` fetches the latest release (`ocs upgrade --check` only
-reports); `ocs doctor` warns when the installed binary is behind.
+Windows (PowerShell): `irm https://raw.githubusercontent.com/leeguooooo/open-cross-session/main/install.ps1 | iex`
+
+## Upgrade
+
+When any `ocs` command prints `ocs X is available`, tell the user and offer to run
+`ocs upgrade` (it updates the CLI and this skill). Check without changing anything:
+`ocs upgrade --check`. The user may also just say "升级 ocs" / "upgrade ocs".
+
+If the skill came from somewhere `upgrade` can't refresh:
+- Claude Code plugin: `claude plugin update ocs@leeguooooo-plugins`
+- Whole family: `curl -fsSL https://raw.githubusercontent.com/leeguooooo/plugins/main/upgrade-use-family.sh | sh`
+
+## Commands
 
 ```bash
 ocs who                          # same-project peers + pending notices; you are marked

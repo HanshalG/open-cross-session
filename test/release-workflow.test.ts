@@ -16,6 +16,24 @@ test("release workflow signs and smokes macOS binaries before packaging", () => 
   expect(archive).toBeGreaterThan(smoke);
 });
 
+test("release workflow Developer ID-signs and notarizes macOS binaries when secrets exist", () => {
+  const workflow = readFileSync(join(import.meta.dir, "..", ".github", "workflows", "release.yml"), "utf8");
+  const sign = workflow.indexOf("codesign --force --options runtime --timestamp --entitlements scripts/entitlements.plist");
+  const notarize = workflow.indexOf("xcrun notarytool submit");
+  const gatekeeper = workflow.indexOf("spctl -a -vvv -t install ocs");
+  const smoke = workflow.indexOf("run: ./ocs help");
+  expect(workflow).toContain("if: runner.os == 'macOS' && env.HAS_SIGNING == 'true'");
+  expect(workflow).toContain("if: runner.os == 'macOS' && env.HAS_SIGNING != 'true'");
+  expect(sign).toBeGreaterThan(0);
+  expect(notarize).toBeGreaterThan(sign);
+  expect(gatekeeper).toBeGreaterThan(notarize);
+  expect(smoke).toBeGreaterThan(gatekeeper);
+  // hardened runtime 下 bun 的 JIT 必需；少了这两项签好的二进制一启动就被杀
+  const entitlements = readFileSync(join(import.meta.dir, "..", "scripts", "entitlements.plist"), "utf8");
+  expect(entitlements).toContain("com.apple.security.cs.allow-jit");
+  expect(entitlements).toContain("com.apple.security.cs.allow-unsigned-executable-memory");
+});
+
 test("release workflow builds, smokes, and checksums the Windows binary on real Windows", () => {
   const workflow = readFileSync(join(import.meta.dir, "..", ".github", "workflows", "release.yml"), "utf8");
   const win = workflow.slice(workflow.indexOf("  windows:"));

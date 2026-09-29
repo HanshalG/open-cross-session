@@ -145,7 +145,7 @@ describe("ocs upgrade（端到端，假 GitHub + 假 installer）", () => {
     expect(r.stdout).toContain(OCS_VERSION);
   }, T);
 
-  test("--check 只报告不安装；查不到最新版时退出码 1 且不安装", async () => {
+  test("--check 只报告不安装（use-family 统一格式）；查不到最新版时退出码 2 且不安装", async () => {
     const gh = fakeGithub({ tag: `v${bump(OCS_VERSION, 1)}` });
     const inst = fakeInstaller(0);
     const check = await runCli(["upgrade", "--check"], {
@@ -154,7 +154,10 @@ describe("ocs upgrade（端到端，假 GitHub + 假 installer）", () => {
     });
     expect(check.code).toBe(0);
     expect(existsSync(inst.marker)).toBe(false);
-    expect(check.stdout).toContain(`v${bump(OCS_VERSION, 1)}`);
+    expect(check.stdout).toBe(`ocs ${OCS_VERSION} -> ${bump(OCS_VERSION, 1)}\n`);
+    const same = fakeGithub({ tag: `v${OCS_VERSION}` });
+    expect((await runCli(["upgrade", "--check"], { [OCS_UPGRADE_LATEST_URL_ENV]: same.url })).stdout)
+      .toBe(`ocs ${OCS_VERSION} is up to date\n`);
 
     const down = fakeGithub({ status: 500 });
     const inst2 = fakeInstaller(0);
@@ -162,9 +165,26 @@ describe("ocs upgrade（端到端，假 GitHub + 假 installer）", () => {
       [OCS_UPGRADE_LATEST_URL_ENV]: down.url,
       [OCS_UPGRADE_INSTALLER_ENV]: inst2.path,
     });
-    expect(r.code).toBe(1);
+    expect(r.code).toBe(2);
     expect(existsSync(inst2.marker)).toBe(false);
     expect(r.stderr).toContain("HTTP 500");
+  }, T);
+
+  test("--json：name/current/latest/update_available/skills，查不到时退出码 2", async () => {
+    const gh = fakeGithub({ tag: `v${bump(OCS_VERSION, 1)}` });
+    const ok = await runCli(["upgrade", "--json"], { [OCS_UPGRADE_LATEST_URL_ENV]: gh.url, HOME: tempDir("ocs-upgrade-json-") });
+    expect(ok.code).toBe(0);
+    expect(JSON.parse(ok.stdout)).toEqual({
+      name: "ocs",
+      current: OCS_VERSION,
+      latest: bump(OCS_VERSION, 1),
+      update_available: true,
+      skills: [],
+    });
+    const down = fakeGithub({ status: 500 });
+    const bad = await runCli(["upgrade", "--json"], { [OCS_UPGRADE_LATEST_URL_ENV]: down.url });
+    expect(bad.code).toBe(2);
+    expect(JSON.parse(bad.stdout)).toMatchObject({ name: "ocs", latest: null, update_available: false });
   }, T);
 
   test("--party 只打印迁移指南，不联网不安装", async () => {
@@ -195,5 +215,53 @@ describe("ocs doctor 的版本检查", () => {
     expect(skipped.stderr).toBe("");
     expect(skipped.stdout).not.toContain(`v${bump(OCS_VERSION, 1)}`);
     expect(gh2.hits()).toBe(0);
+  }, T);
+});
+
+describe("每日新版本提示（use-family 升级约定 §2）", () => {
+  const notice = (latest: string) => `ocs ${latest} is available (you have ${OCS_VERSION}). Upgrade: ocs upgrade\n`;
+
+  function cacheEnv(entry: { checked_at: number; latest: string | null } | null) {
+    const cache = tempDir("ocs-update-cache-");
+    if (entry !== null) {
+      const { mkdirSync } = require("node:fs") as typeof import("node:fs");
+      mkdirSync(join(cache, "ocs"), { recursive: true });
+      writeFileSync(join(cache, "ocs", "update-check.json"), JSON.stringify(entry));
+    }
+    // 显式打开检查（preload 里默认关着），CI 变量也清掉
+    return { XDG_CACHE_HOME: cache, OCS_NO_UPDATE_CHECK: "", USE_NO_UPDATE_CHECK: "", CI: "" };
+  }
+
+  test("缓存新鲜且更新：stderr 恰好一行，stdout 不受影响；upgrade/version 不提示", async () => {
+    const env = cacheEnv({ checked_at: Math.floor(Date.now() / 1000), latest: bump(OCS_VERSION, 1) });
+    const r = await runCli(["read", "some-channel", "--as", "tester", "--peek"], env);
+    expect(r.stderr).toBe(notice(bump(OCS_VERSION, 1)));
+    expect(r.stdout).not.toContain("is available");
+    expect((await runCli(["version"], env)).stderr).toBe("");
+    for (const disabled of [{ CI: "true" }, { OCS_NO_UPDATE_CHECK: "1" }, { USE_NO_UPDATE_CHECK: "1" }]) {
+      expect((await runCli(["read", "c", "--as", "t", "--peek"], { ...env, ...disabled })).stderr).toBe("");
+    }
+  }, T);
+
+  test("缓存过期：前台不等，后台 _update-check 查一次写回缓存（失败也写 checked_at）", async () => {
+    const gh = fakeGithub({ tag: `v${bump(OCS_VERSION, 2)}` });
+    const env = { ...cacheEnv({ checked_at: 0, latest: null }), [OCS_UPGRADE_LATEST_URL_ENV]: gh.url };
+    const r = await runCli(["read", "c", "--as", "t", "--peek"], env);
+    expect(r.stderr).toBe("");
+    const { readFileSync } = require("node:fs") as typeof import("node:fs");
+    const path = join(env.XDG_CACHE_HOME, "ocs", "update-check.json");
+    const deadline = Date.now() + 8000;
+    let cached: { checked_at: number; latest: string | null } = { checked_at: 0, latest: null };
+    while (Date.now() < deadline) {
+      cached = JSON.parse(readFileSync(path, "utf8"));
+      if (cached.latest !== null) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    expect(cached.latest).toBe(bump(OCS_VERSION, 2));
+    expect(Date.now() / 1000 - cached.checked_at).toBeLessThan(60);
+    expect(gh.hits()).toBe(1);
+    // 下一次调用用缓存提示，不再联网
+    expect((await runCli(["read", "c", "--as", "t", "--peek"], env)).stderr).toBe(notice(bump(OCS_VERSION, 2)));
+    expect(gh.hits()).toBe(1);
   }, T);
 });

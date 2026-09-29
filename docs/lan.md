@@ -157,6 +157,7 @@ UDP 组播 `239.255.67.83:47891`（不用 mDNS，不和系统 mDNSResponder / av
 放行规则按程序路径记，换安装位置、每次升级（ad-hoc 签名的 cdhash 会变）都要重新登记。所以 `ocs lan up`
 监听非回环地址时会用 `socketfilterfw --add/--unblockapp` 放行 ocs 自己（当前用户自己的程序不需要 sudo），
 登记失败时提示去 系统设置 › 网络 › 防火墙 手动允许。用 bun 跑源码时不代为放行 bun。
+从 0.6.2 起发行版是 Developer ID 签名 + 公证的，防火墙的「自动允许下载的已签名软件」开着时本来就会放行。
 
 ## 登录自启
 

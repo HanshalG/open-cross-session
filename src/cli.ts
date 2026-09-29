@@ -105,11 +105,16 @@ import {
   checkUpgrade,
   OCS_INSTALL_SCRIPT_URL,
   OCS_UPGRADE_INSTALLER_ENV,
+  detectSkillChannels,
+  maybeUpdateNotice,
+  refreshSkills,
   runInstaller,
+  runUpdateCheck,
+  UPDATE_CHECK_COMMAND,
   upgradeCheckEnabled,
 } from "./upgrade.ts";
 
-export const OCS_VERSION = "0.6.1";
+export const OCS_VERSION = "0.6.2";
 
 const LANG = detectLang();
 const M = messages(LANG);
@@ -159,7 +164,9 @@ const COMMAND_SPECS: Record<string, CommandSpec> = {
   watch: { value: ["interval-ms"], bool: [], minPos: 1, maxPos: 1 },
   doctor: { value: [], bool: ["fix"], minPos: 0, maxPos: 0 },
   skill: { value: [], bool: [], minPos: 1, maxPos: 1 },
-  upgrade: { value: [], bool: ["check", "party"], minPos: 0, maxPos: 0 },
+  upgrade: { value: [], bool: ["check", "json", "party"], minPos: 0, maxPos: 0 },
+  /** 内部：后台查一次最新版本写缓存（use-family 升级约定 §2，不进 help）。 */
+  [UPDATE_CHECK_COMMAND]: NO_ARGS,
   version: NO_ARGS,
   "--version": NO_ARGS,
   "--help": NO_ARGS,
@@ -934,11 +941,32 @@ async function cmdUpgrade(parsed: Parsed): Promise<void> {
     console.log(M.upgrade);
     return;
   }
-  console.log(M.upgradeChecking);
+  // --check / --json 是 use-family 统一格式（leeguooooo/plugins docs/upgrade.md），不做本地化：
+  // upgrade-use-family.sh 和别的 agent 按字面解析。查不到最新版时退出码 2。
+  const machine = parsed.flags.has("check") || parsed.flags.has("json");
+  if (!machine) console.log(M.upgradeChecking);
   const check = await checkUpgrade(OCS_VERSION);
+  if (parsed.flags.has("json")) {
+    console.log(JSON.stringify({
+      name: "ocs",
+      current: OCS_VERSION,
+      latest: check.status === "unknown" ? null : check.latest.replace(/^v/, ""),
+      update_available: check.status === "behind",
+      skills: detectSkillChannels(),
+      ...(check.status === "unknown" ? { error: check.error } : {}),
+    }, null, 2));
+    if (check.status === "unknown") process.exitCode = 2;
+    return;
+  }
   if (check.status === "unknown") {
     console.error(M.upgradeCheckFailed(check.error));
-    process.exitCode = 1;
+    process.exitCode = 2;
+    return;
+  }
+  if (parsed.flags.has("check")) {
+    console.log(check.status === "behind"
+      ? `ocs ${OCS_VERSION} -> ${check.latest.replace(/^v/, "")}`
+      : `ocs ${OCS_VERSION} is up to date`);
     return;
   }
   if (check.status === "current") {
@@ -951,12 +979,13 @@ async function cmdUpgrade(parsed: Parsed): Promise<void> {
     return;
   }
   console.log(M.upgradeBehind(check.current, check.latest));
-  if (parsed.flags.has("check")) return;
   // installer 自带 sha256 校验 + 冒烟 + 原子替换；失败时现有二进制不受影响。
   const local = process.env[OCS_UPGRADE_INSTALLER_ENV];
   console.log(M.upgradeRunning(local ? `sh ${local}` : `curl -fsSL ${OCS_INSTALL_SCRIPT_URL} | sh`));
   const run = runInstaller();
   if (run.code === 0) {
+    // 约定 §3：二进制换了，别处拷贝/检出/插件里的 SKILL.md 不会跟着动，逐个刷新。
+    for (const line of refreshSkills(detectSkillChannels())) console.log(line);
     console.log(M.upgradeDone);
     console.log(M.upgradePartyHint);
   } else {
@@ -1083,7 +1112,8 @@ async function cmdDoctor(parsed: Parsed): Promise<void> {
     let stat = statSync(home);
     if (!stat.isDirectory()) {
       bad(M.doctorDataNotDirectory(home));
-    } else if ((stat.mode & 0o077) !== 0) {
+    } else if (process.platform !== "win32" && (stat.mode & 0o077) !== 0) {
+      // Windows 的访问控制在 NTFS ACL 里，mode 位恒是 0o666，查它只会误报。
       if (parsed.flags.has("fix")) {
         chmodSync(home, 0o700);
         stat = statSync(home);
@@ -1114,7 +1144,7 @@ async function cmdDoctor(parsed: Parsed): Promise<void> {
 
 export const SKILL_MD = `---
 name: ocs
-description: Talk to any other AI coding agent on this machine (Claude Code sessions, Codex tasks, Pi sessions, terminal TUIs) over open-cross-session. Use when asked to discuss with, delegate to, wake, or message another local agent/session, or to check what other agents are running.
+description: Talk to any other AI coding agent on this machine or a paired machine on the same LAN (Claude Code sessions, Codex tasks, Pi sessions, terminal TUIs) over open-cross-session. Use when asked to discuss with, delegate to, wake, or message another agent/session (local, or <address>@<peer> on another computer), or to check what other agents are running.
 ---
 
 # ocs — talk to other local agents
@@ -1122,14 +1152,25 @@ description: Talk to any other AI coding agent on this machine (Claude Code sess
 Discover who is reachable, then message them. Channels are plumbing — you never
 need to create or manage them.
 
-## Install / upgrade
+## Install
 
 If \`ocs\` is not on PATH, install the GitHub Release binary (no token needed):
 
     curl -fsSL https://raw.githubusercontent.com/leeguooooo/open-cross-session/main/install.sh | sh
 
-Keep it current: \`ocs upgrade\` fetches the latest release (\`ocs upgrade --check\` only
-reports); \`ocs doctor\` warns when the installed binary is behind.
+Windows (PowerShell): \`irm https://raw.githubusercontent.com/leeguooooo/open-cross-session/main/install.ps1 | iex\`
+
+## Upgrade
+
+When any \`ocs\` command prints \`ocs X is available\`, tell the user and offer to run
+\`ocs upgrade\` (it updates the CLI and this skill). Check without changing anything:
+\`ocs upgrade --check\`. The user may also just say "升级 ocs" / "upgrade ocs".
+
+If the skill came from somewhere \`upgrade\` can't refresh:
+- Claude Code plugin: \`claude plugin update ocs@leeguooooo-plugins\`
+- Whole family: \`curl -fsSL https://raw.githubusercontent.com/leeguooooo/plugins/main/upgrade-use-family.sh | sh\`
+
+## Commands
 
 \`\`\`bash
 ocs who                          # same-project peers + pending notices; you are marked
@@ -1324,6 +1365,7 @@ async function main(): Promise<void> {
     fail(`${M.unknownCommand(command)}\n\n${M.help}`);
   }
   const parsed = parseArgs(rest, spec ?? NO_ARGS);
+  maybeUpdateNotice(OCS_VERSION, command, selfCommand());
   switch (command) {
     case "send":
       await cmdSend(parsed);
@@ -1339,6 +1381,9 @@ async function main(): Promise<void> {
       break;
     case "lan":
       await cmdLan(lanContext(parsed));
+      break;
+    case UPDATE_CHECK_COMMAND:
+      await runUpdateCheck();
       break;
     case LAN_DAEMON_COMMAND:
       await runLanDaemon(OCS_VERSION, LANG);

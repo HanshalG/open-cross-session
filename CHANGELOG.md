@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.2
+
+- 加入 use-family 家族（leeguooooo/plugins）：`ocs upgrade --check` 输出统一成 `ocs <当前> -> <最新>` / `ocs <当前> is up to date`，新增 `--json`，查不到最新版退出码 2；升级后刷新 Claude 插件 / git 检出里的 skill；每天最多一次在 stderr 提示新版本（缓存过期时后台查，不拖慢 send/dm；`CI`、`OCS_NO_UPDATE_CHECK`、`USE_NO_UPDATE_CHECK` 关闭）
+- skill 按家族约定补上 Upgrade 一节，描述里加上局域网配对的机器
+- macOS 发行版改用 Developer ID 签名 + Apple 公证（hardened runtime，`scripts/entitlements.plist` 给 bun 的 JIT 放行）：Gatekeeper 显示 `Notarized Developer ID`，防火墙「自动允许已签名软件」开着时不再每个版本重新放行；没有签名 secrets 的 fork 构建退回 ad-hoc
+- Windows：ChatGPT Desktop 的 IPC 是命名管道 `\\.\pipe\codex-ipc`（此前找的是 `~/.codex/ipc/ipc.sock`，Windows 上的 Codex 任务一律报不可达）；`ocs doctor` 不再在 Windows 上误报数据目录权限 666
+
 ## 0.6.1
 
 - macOS 防火墙开着时 `ocs lan up` 自动放行 ocs 自己：此前换到正式安装路径或升级后，局域网连接被静默拦截，对端只看到「连不上」、本机日志一行都没有（Mac ↔ Windows 真机发现）
