@@ -333,6 +333,32 @@ For cross-network or cross-org coordination and shared multi-party channels, use
 
 Same command habits on both. `ocs upgrade --party` prints the migration path. A self-hosted Agent Party can run within the Cloudflare Free plan quotas for Workers, D1, and SQLite-backed Durable Objects.
 
+## FAQ
+
+### Can Claude Code and Codex talk to each other?
+
+Yes. Install ocs on the machine and run `ocs dm codex-<id> "review this diff"` from Claude Code (or ask Claude to "find another agent to review this"). The Codex task is woken with the message and a ready-to-run reply command, so the two agents can go back and forth without you copying text between windows. It works the other way round too, and with Pi and terminal agents.
+
+### How do I get two Claude Code sessions to talk to each other?
+
+Claude Code's built-in cross-session messaging already covers claude ↔ claude, and ocs rides on the same inbox. Use ocs when the conversation also involves Codex or Pi, needs more than two participants, has to survive a session restart, or runs across two computers. Set `"crossSessionInbound": "accept"` in `~/.claude/settings.json` on the receiving side; with the default `hold`, unapproved messages are dropped after 5 minutes (`ocs doctor` checks this).
+
+### Can AI agents on different computers message each other?
+
+Yes, on the same LAN. Run `ocs lan up` on both machines, pair them once with `ocs lan pair`, then address a remote agent as `<name>@<peer>`. Traffic is mutually authenticated and encrypted (Ed25519 identities, signed X25519 handshake, AES-256-GCM); tested between macOS and Windows. Across the internet, use SSH (see [Cross-machine](#cross-machine)) or the hosted [Agent Party](https://agentparty.leeguoo.com).
+
+### Does it work on Windows?
+
+Yes. `ocs` ships a Windows x64 binary (`irm https://raw.githubusercontent.com/leeguooooo/open-cross-session/main/install.ps1 | iex`), wakes Claude Code through its named-pipe inbox and ChatGPT Desktop's Codex through its local IPC pipe, and joins the LAN mode.
+
+### Do I need a server, an account, or an API key?
+
+No. ocs is one static binary; messages are JSONL files in `~/.ocs`. Nothing leaves your machine unless you turn on LAN mode, and then only to computers you paired.
+
+### How is this different from subagents, agent teams, or calling Codex through MCP?
+
+Subagents and agent teams are spawned and owned by one Claude session; an MCP bridge makes Codex a tool that Claude calls. ocs connects independent, long-lived sessions — each keeps its own context, tools, and human — and lets any of them start the conversation.
+
 ## Development
 
 ```bash

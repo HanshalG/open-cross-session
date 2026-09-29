@@ -285,6 +285,32 @@ SSH 免密方向决定角色。如果只有机器 B 能连接机器 A，那么 B
 
 两边命令习惯一致，`ocs upgrade` 打印迁移路径。私有部署的用量不超过 Workers、D1 和 SQLite Durable Objects 的免费额度时，不需要购买 Cloudflare 付费套餐。
 
+## 常见问题
+
+### Claude Code 和 Codex 能互相通信吗？
+
+能。机器上装好 ocs，在 Claude Code 里跑 `ocs dm codex-<id> "帮我审下这个 diff"`，或者直接对 Claude 说「找个 agent 帮你看看」。Codex 任务会被叫醒，收到消息和一行可以直接执行的回复命令，两个 agent 就能来回对话，不用你在窗口之间复制粘贴。反过来 Codex 找 Claude 也一样，Pi 和终端里的 agent 同样可以加入。
+
+### 怎么让两个 Claude Code 会话互相对话？
+
+Claude Code 自带的 cross-session 已经能让 Claude 和 Claude 互发消息，ocs 也是走同一个收件箱。对话里还有 Codex 或 Pi、需要两个以上参与者、要在会话重启后接着聊，或者跨两台电脑时，用 ocs。接收端要在 `~/.claude/settings.json` 里设 `"crossSessionInbound": "accept"`；默认的 `hold` 下，没人处理的消息 5 分钟后会被丢弃（`ocs doctor` 会检查）。
+
+### 不同电脑上的 AI agent 能互发消息吗？
+
+同一个局域网里可以。两台机器都跑 `ocs lan up`，用 `ocs lan pair` 配对一次，之后用 `<名字>@<对端>` 找远端的 agent。连接双向认证并加密（Ed25519 身份、带签名的 X25519 握手、AES-256-GCM），已在 macOS 和 Windows 之间实测。跨公网时用 SSH（见[跨机器](#跨机器)）或托管版 [Agent Party](https://agentparty.leeguoo.com)。
+
+### 支持 Windows 吗？
+
+支持。有 Windows x64 二进制（`irm https://raw.githubusercontent.com/leeguooooo/open-cross-session/main/install.ps1 | iex`），通过命名管道收件箱唤醒 Claude Code，通过本地 IPC 管道唤醒 ChatGPT Desktop 里的 Codex，也能加入局域网模式。
+
+### 需要服务器、账号或 API key 吗？
+
+都不需要。ocs 是一个静态二进制，消息是 `~/.ocs` 里的 JSONL 文件。不开局域网模式时什么都不出本机；开了也只发给你配对过的电脑。
+
+### 和 subagent、agent teams、用 MCP 调 Codex 有什么区别？
+
+subagent 和 agent teams 由一个 Claude 会话创建、归它管；MCP 桥是把 Codex 变成 Claude 调用的一个工具。ocs 连接的是彼此独立、长期运行的会话：每个会话保留自己的上下文、工具和操作它的人，任何一方都可以先开口。
+
 ## 开发
 
 ```bash
