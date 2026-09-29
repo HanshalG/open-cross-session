@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.4
+
+- 局域网：远端 `who --lan` 和远端 DM 判断 Codex 任务可达时，也认「被 ChatGPT Desktop 认领」（和本机 `ocs who` 同一判据）。此前只认 lsof 找到的活进程，Windows 上开着的 Desktop 任务对远端整个隐身、DM 被拒 not-found
+
 ## 0.6.3
 
 - Windows：`ocs doctor` 把 `codex queue` 标成「Windows 上不走」而不是警告（没有 lsof 证明任务活着，Desktop 任务走 IPC）；`ocs upgrade` 打印实际运行的 `install.ps1` 命令

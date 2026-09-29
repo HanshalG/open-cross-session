@@ -36,6 +36,7 @@ import { acceptSecure } from "./lan-wire.ts";
 import { claudeShortId, entryShortId, listOcsNames, ocsNameFor, readOcsName } from "./names.ts";
 import { buildRoster, resolveDmTarget, type ResolvedDmTarget } from "./roster.ts";
 import { codexThreadLivePid } from "./codex-queue.ts";
+import { codexDesktopIpcAvailable, discoverCodexDesktopOwners } from "./codex-ipc.ts";
 import { appendMessage, BODY_LIMIT, NAME_RE, OCS_IDENTITY_RE } from "./store.ts";
 
 export const LAN_DAEMON_COMMAND = "_lan-daemon";
@@ -107,10 +108,29 @@ export interface LanWhoEntry {
   label?: string;
 }
 
+/**
+ * Codex 任务可达 = 有活进程持有 rollout（`codex queue` 可投）**或**被 Desktop renderer 认领
+ * （IPC 可投）——和本机 `ocs who` 同一判据（铁律 10）。只认前者的话，Windows（没有 lsof）上
+ * 开着的 Desktop 任务对远端整个隐身。探测失败按「没认领」处理。
+ */
+async function desktopClaimed(threadIds: readonly string[], env: NodeJS.ProcessEnv): Promise<Set<string>> {
+  if (threadIds.length === 0 || !codexDesktopIpcAvailable(env)) return new Set();
+  try {
+    return new Set(Object.keys(await discoverCodexDesktopOwners(threadIds, { env })).map((id) => id.toLowerCase()));
+  } catch {
+    return new Set();
+  }
+}
+
 /** 远端 who：只给地址、种类、状态和一句短标签，不给 pid / 路径。 */
-export function lanWhoEntries(env: NodeJS.ProcessEnv = process.env): LanWhoEntry[] {
+export async function lanWhoEntries(env: NodeJS.ProcessEnv = process.env): Promise<LanWhoEntry[]> {
   const out: LanWhoEntry[] = [];
-  for (const entry of buildRoster(env).entries) {
+  const roster = buildRoster(env);
+  const claimed = await desktopClaimed(
+    roster.entries.flatMap((e) => (e.kind === "codex-task" && e.livePid === null ? [e.threadId] : [])),
+    env,
+  );
+  for (const entry of roster.entries) {
     if (entry.kind === "claude") {
       out.push({
         address: entry.ocsName ?? entry.id ?? entry.name,
@@ -118,7 +138,7 @@ export function lanWhoEntries(env: NodeJS.ProcessEnv = process.env): LanWhoEntry
         ...(entry.status === null ? {} : { status: entry.status }),
         ...(entry.ocsName === undefined ? { label: entry.name.slice(0, 60) } : {}),
       });
-    } else if (entry.kind === "codex-task" && entry.livePid !== null) {
+    } else if (entry.kind === "codex-task" && (entry.livePid !== null || claimed.has(entry.threadId.toLowerCase()))) {
       out.push({
         address: entry.ocsName ?? entry.target,
         kind: "codex",
@@ -180,8 +200,11 @@ export async function handleLanDm(
     resolved.ambiguousPiTargets ?? resolved.ambiguousNameTargets;
   if (ambiguous !== undefined) return { ok: false, error: "ambiguous" };
   // 远端只投活目标：格式合法的 codex uuid / pi-<uuid> 本机未必有，照单落盘等于让对端随手造频道。
-  if (resolved.kind === "codex-task" && (resolved.threadId === undefined || codexThreadLivePid(resolved.threadId, env) === null)) {
-    return { ok: false, error: "not-found" };
+  if (resolved.kind === "codex-task") {
+    const thread = resolved.threadId;
+    const live = thread !== undefined &&
+      (codexThreadLivePid(thread, env) !== null || (await desktopClaimed([thread], env)).has(thread.toLowerCase()));
+    if (!live) return { ok: false, error: "not-found" };
   }
   if (resolved.kind === "pi" && resolved.piSession === undefined) return { ok: false, error: "not-found" };
   const local = localAddressOf(resolved, to, env);
@@ -381,7 +404,7 @@ export async function startLanServer(
       } else {
         if (conn.clientPort !== null) notePeerAddress(peer.fingerprint, `${ip}:${conn.clientPort}`, env);
         if (op === "ping") reply = { ok: true, name: config.name };
-        else if (op === "who") reply = { ok: true, name: config.name, entries: lanWhoEntries(env) };
+        else if (op === "who") reply = { ok: true, name: config.name, entries: await lanWhoEntries(env) };
         else if (op === "dm" && !quota.take(peer.fingerprint, typeof req.body === "string" ? Buffer.byteLength(req.body, "utf8") : 0)) {
           reply = { ok: false, error: "quota-exceeded" };
           log(`quota exceeded for ${peer.label}`);
