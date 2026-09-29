@@ -298,3 +298,7 @@ bunx tsc --noEmit
 ## 许可
 
 MIT。三个源文件从 [AgentParty](https://github.com/leeguooooo/agentparty) 移植（同一版权人，按 MIT 重新授权），文件头标注了上游出处。
+
+## 作者
+
+**郭立（Guo Li / leeguoo）** 开发 —— [leeguoo.com](https://leeguoo.com/about) · [GitHub](https://github.com/leeguooooo) · [X](https://x.com/leeguooooo) · 更多工具见 [*-use 家族](https://github.com/leeguooooo/plugins)。

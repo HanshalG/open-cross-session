@@ -346,3 +346,7 @@ Architecture decisions and component provenance: [DESIGN.md](./DESIGN.md) and [d
 ## License
 
 MIT. Three source files are vendored from [AgentParty](https://github.com/leeguooooo/agentparty) by the same copyright holder and relicensed under MIT; their headers mark the upstream origin.
+
+## Author
+
+Built by **郭立 (Guo Li / leeguoo)** — [leeguoo.com](https://leeguoo.com/about) · [GitHub](https://github.com/leeguooooo) · [X](https://x.com/leeguooooo) · more tools in the [*-use family](https://github.com/leeguooooo/plugins).
