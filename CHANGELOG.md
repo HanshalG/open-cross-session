@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.5
+
+- 让局域网能力看得见：README（中英）开头改成「同一台机器上 + 局域网里的几台电脑之间」，新增「0.6 新增」一节和两台机器上手示例；`ocs help`、`ocs upgrade` 的提示、skill 标题不再只说「本机」，跨网络/跨组织才指向托管版
+- `ocs doctor` 新增「局域网（其他电脑）」一节：没开时给入口，开着时报已配对电脑数和登录自启
+- GitHub Release 说明取自 CHANGELOG 对应一节并附安装命令（此前所有 release 页面都是空的）；CHANGELOG 缺这一节时发版直接失败
+
 ## 0.6.4
 
 - 局域网：远端 `who --lan` 和远端 DM 判断 Codex 任务可达时，也认「被 ChatGPT Desktop 认领」（和本机 `ocs who` 同一判据）。此前只认 lsof 找到的活进程，Windows 上开着的 Desktop 任务对远端整个隐身、DM 被拒 not-found
@@ -21,6 +27,9 @@
 - macOS 防火墙开着时 `ocs lan up` 自动放行 ocs 自己：此前换到正式安装路径或升级后，局域网连接被静默拦截，对端只看到「连不上」、本机日志一行都没有（Mac ↔ Windows 真机发现）
 
 ## 0.6.0
+
+**Agents across your LAN.** Pair two computers once (`ocs lan up`, `ocs lan pair`), then `ocs dm <address>@<peer>` wakes a Claude Code, Codex or Pi session on the other machine; `ocs who --lan` lists them. Mutually authenticated and encrypted, off by default. Windows supported. See docs/lan.md.
+
 
 - 局域网模式（默认关闭）：`ocs lan up` 启动守护进程，`ocs lan pair` 出一次性配对码、另一台 `ocs lan pair <码>` 兑现；之后 `ocs dm <地址>@<对端>` 跨机发消息并唤醒、`ocs who --lan` 看远端 agent。Ed25519 身份 + 签名 X25519 握手 + AES-256-GCM，未配对机器只能兑现有效配对码；协议与威胁模型见 docs/lan.md
 - 唤醒 note 里的正文不再能冒充包装和骨架：`<cross-session-message` 被中和，行首形似 `Reply:` / `Thread:` / 唤醒首行的加 `> `（本地 DM 同样受益；wake-protocol §1 已更新，AgentParty 侧需同步）

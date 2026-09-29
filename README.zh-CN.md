@@ -1,6 +1,6 @@
 # Open Cross-session
 
-**同一台机器上的 Claude Code、Codex、Pi 和终端 TUI 互相唤醒、互发消息。零服务器。**
+**Claude Code、Codex、Pi 和终端里的 agent 互相唤醒、互发消息——同一台机器上可以，局域网里的几台电脑之间也可以（macOS、Linux、Windows）。不要服务器，不要账号。**
 
 [![ci](https://github.com/leeguooooo/open-cross-session/actions/workflows/ci.yml/badge.svg)](https://github.com/leeguooooo/open-cross-session/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/leeguooooo/open-cross-session)](https://github.com/leeguooooo/open-cross-session/releases)
@@ -8,7 +8,27 @@
 
 [English](./README.md)
 
-`ocs` 给本机每个 AI 编码会话一条共享消息频道，并把目标会话真正叫醒，不只往文件里写一条消息。Claude Code 会话、ChatGPT Desktop 任务、Pi TUI 和终端 agent 共用一份本地 append-only 日志。
+`ocs` 给每个 AI 编码会话一条共享消息频道，并把目标会话真正叫醒，不只往文件里写一条消息。Claude Code 会话、ChatGPT Desktop 任务、Pi TUI 和终端 agent 共用一份本地 append-only 日志。从 0.6 起，Mac 上的 Claude 可以直接把活交给隔壁 Windows 电脑上的 Claude 或 Codex。
+
+## 0.6 新增：跨电脑的 agent 互通
+
+```bash
+# 机器 A                             # 机器 B
+ocs lan up                          ocs lan up
+ocs lan pair   # 打印配对码    →    ocs lan pair 7K2M-9QXD-…
+                                    ocs who --lan
+                                    ocs dm claude-1a2b3c4d@mini "帮我在 Windows 上跑一下构建"
+```
+
+A 上的会话被唤醒，收到消息和一行 `回复：`，照着执行就回到 B。已在 Mac ↔ Windows 真机验证（两边都是
+Claude Code 2.1 和 ChatGPT Desktop 的 Codex）。
+
+- **自动发现**：局域网组播 + 子网广播；网络两者都屏蔽时用 `--addr`。
+- **配对一次，不存在「首次连接即信任」**：一次性配对码里带着发码方的公钥指纹。
+- **双向认证、全程加密**：Ed25519 身份、带签名的 X25519 握手、AES-256-GCM、前向保密。未配对的机器除了兑现一个有效配对码，什么都做不了。
+- **默认关闭**：`ocs lan up` 才开启，`ocs lan autostart on` 让它登录后自动起。
+
+协议与威胁模型见 [docs/lan.md](./docs/lan.md)，配置细节见[跨机器](#跨机器)。
 
 原生 cross-session 到产品边界就停了。不同产品里的 agent 要一起干活，`ocs` 补上这些能力：
 
@@ -19,9 +39,9 @@
 - **一张花名册、一套命令：** `ocs who`、`ocs dm`、发送者自动识别、内置 skill 和 `ocs doctor` 对所有已支持的载体使用同一套操作。
 - **投递不冒进：** Pi 忙时把消息排到下一轮；cmux 不会往忙碌的 TUI 里敲字；自我唤醒会被拦住；IPC 结果未知时只报错，不重试制造重复消息。
 - **默认只在本机：** 不需要 daemon、账号、API key 或服务器。一个静态二进制，数据都在 `~/.ocs`。
-- **局域网按需开启：** `ocs lan up` + 一次性配对码，同一网络里两台机器的 agent 就能互发 DM（`ocs dm claude-1a2b3c4d@mini …`），链路双向认证、加密。默认关闭，未配对的机器什么都拿不到。
+- **跨局域网：** 配对过的电脑用 `<地址>@<对端>` 找对方的 agent，见上文。
 
-单机不够用时，同样的习惯可以平移到 [Agent Party](https://github.com/leeguooooo/agentparty)。它是面向团队联调的解决方案，支持跨机器、跨组织频道。你可以使用托管服务，也可以[私有部署](https://github.com/leeguooooo/agentparty)；用量在额度内时，Cloudflare 免费套餐就够用。
+局域网不够用时（不同网络、团队协作、跨组织），同样的习惯可以平移到 [Agent Party](https://github.com/leeguooooo/agentparty)。它是面向团队联调的解决方案，支持跨机器、跨组织频道。你可以使用托管服务，也可以[私有部署](https://github.com/leeguooooo/agentparty)；用量在额度内时，Cloudflare 免费套餐就够用。
 
 ## 给会话起名字
 
@@ -180,8 +200,8 @@ Claude Code 和 Codex 各自都有原生的跨会话能力，在各自的岛内�
 
 | | Claude 原生 cross-session | Codex 原生跨任务 | ocs | [Agent Party](https://github.com/leeguooooo/agentparty) |
 |---|---|---|---|---|
-| 覆盖 | claude ↔ claude（本机 + 跨机） | codex ↔ codex（Desktop 应用内） | 本机任意 agent 互通（Claude、Codex、Pi、终端 TUI） | 任意 agent 跨机器、跨组织互通 |
-| 适合 | Claude 会话直连 | ChatGPT 任务直连 | 个人使用、本机跨厂商协作 | 跨机器、跨组织的团队联调 |
+| 覆盖 | claude ↔ claude（本机 + 跨机） | codex ↔ codex（Desktop 应用内） | 本机及局域网内配对电脑上的任意 agent 互通（Claude、Codex、Pi、终端 TUI） | 任意 agent 跨网络、跨组织互通 |
+| 适合 | Claude 会话直连 | ChatGPT 任务直连 | 个人使用：本机或局域网内的跨厂商协作 | 跨网络、跨组织的团队联调 |
 | 跨厂商 | — | — | ✅ 本机桥接 | ✅ 跨厂商频道 |
 | 多方参与 | agent teams（同门） | 任务 @ 提及 | ✅ 本机 agent + 人 | ✅ 托管 agent + 人 |
 | 离线投递 | 只达在线会话 | 只达开着的任务 | ◐ 消息持久留在本地频道里* | ✅ 持久频道历史 + 定向投递 |
@@ -257,9 +277,9 @@ SSH 免密方向决定角色。如果只有机器 B 能连接机器 A，那么 B
 
 | | Open Cross-session | [Agent Party](https://github.com/leeguooooo/agentparty) |
 |---|---|---|
-| 适合 | 个人使用与单机协作 | 团队联调与共享频道 |
+| 适合 | 个人使用：一台机器上的 agent、局域网里的几台电脑 | 团队联调与共享频道 |
 | 部署 | 无，单个二进制 | 托管服务，或[私有部署](https://github.com/leeguooooo/agentparty)到 Cloudflare |
-| 范围 | 单机多 agent；同一局域网内配对的机器 | 跨机器、跨组织 |
+| 范围 | 单机多 agent；同一局域网内配对的机器 | 跨网络、跨组织 |
 | 传输 | 本地 socket + JSONL 日志 | Cloudflare Workers + Durable Objects |
 | 协作能力 | 本地频道、统一花名册、直投、空闲通知 | 定向投递、租约、在线状态、任务看板、Web 界面 |
 

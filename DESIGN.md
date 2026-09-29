@@ -4,7 +4,7 @@
 
 ## 一、定位
 
-**跨 agent（Claude Code ↔ Codex ↔ Pi）、跨 session 的本地协作层，零服务器。**
+**跨 agent（Claude Code ↔ Codex ↔ Pi）、跨 session 的本地协作层，零服务器；v0.6 起延伸到局域网内配对的电脑。**
 多方频道语义（N 个 agent + 人同频道），真唤醒（不是文件轮询），
 与托管版 Agent Party 共享协议——单机玩顺后一条命令升级到跨机器/跨组织。
 

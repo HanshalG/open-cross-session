@@ -59,6 +59,11 @@ export interface LanCatalog {
   autostartOff: (removed: boolean) => string;
   autostartUnsupported: string;
   statusAutostart: (state: "on" | "stale" | "off") => string;
+  doctorHeader: string;
+  doctorOff: string;
+  doctorRunning: (name: string, port: number, peers: number) => string;
+  doctorNoPeers: string;
+  doctorAutostartOff: string;
 }
 
 const en: LanCatalog = {
@@ -127,6 +132,11 @@ const en: LanCatalog = {
   autostartOn: (where) => `lan: the daemon will start at login (${where}); \`ocs lan up\` starts it now`,
   autostartOff: (removed) => removed ? "lan: login autostart removed (a running daemon keeps running; `ocs lan down` stops it)" : "lan: login autostart was not set",
   autostartUnsupported: "lan: login autostart is not supported on this platform",
+  doctorHeader: "LAN (other computers)",
+  doctorOff: "LAN mode is off (optional): reach agents on your other computers with `ocs lan up` + `ocs lan pair` — see docs/lan.md",
+  doctorRunning: (name, port, peers) => `LAN daemon running as ${name} on port ${port}, ${peers} paired peer${peers === 1 ? "" : "s"}`,
+  doctorNoPeers: "no paired computers yet: `ocs lan pair` here, `ocs lan pair <code>` on the other one",
+  doctorAutostartOff: "LAN daemon will not come back after a restart: `ocs lan autostart on`",
   statusAutostart: (state) => `  start at login: ${state === "on" ? "on" : state === "stale" ? "stale (points at another ocs install — run `ocs lan autostart on`)" : "off (`ocs lan autostart on`)"}`,
 };
 
@@ -196,6 +206,11 @@ const zh: LanCatalog = {
   autostartOn: (where) => `lan: 登录后会自动启动守护进程（${where}）；现在就要用请跑 \`ocs lan up\``,
   autostartOff: (removed) => removed ? "lan: 已取消登录自启（正在跑的守护进程不受影响，停它用 `ocs lan down`）" : "lan: 本来就没设登录自启",
   autostartUnsupported: "lan: 这个平台不支持登录自启",
+  doctorHeader: "局域网（其他电脑）",
+  doctorOff: "局域网模式未开启（可选）：`ocs lan up` + `ocs lan pair` 就能找到你其他电脑上的 agent，见 docs/lan.md",
+  doctorRunning: (name, port, peers) => `局域网守护进程运行中：${name}，端口 ${port}，已配对 ${peers} 台电脑`,
+  doctorNoPeers: "还没有配对的电脑：这台跑 `ocs lan pair`，另一台跑 `ocs lan pair <配对码>`",
+  doctorAutostartOff: "重启后局域网守护进程不会自动回来：`ocs lan autostart on`",
   statusAutostart: (state) => `  登录自启：${state === "on" ? "开" : state === "stale" ? "失效（指向别处的 ocs，重跑 `ocs lan autostart on`）" : "关（`ocs lan autostart on`）"}`,
 };
 

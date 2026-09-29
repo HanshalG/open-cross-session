@@ -3,10 +3,11 @@ name: ocs
 description: Talk to any other AI coding agent on this machine or a paired machine on the same LAN (Claude Code sessions, Codex tasks, Pi sessions, terminal TUIs) over open-cross-session. Use when asked to discuss with, delegate to, wake, or message another agent/session (local, or <address>@<peer> on another computer), or to check what other agents are running.
 ---
 
-# ocs — talk to other local agents
+# ocs — talk to other agents, here and on your other computers
 
 Discover who is reachable, then message them. Channels are plumbing — you never
-need to create or manage them.
+need to create or manage them. Agents on a paired computer in the same LAN are
+addressed as `<address>@<peer>` (`ocs who --lan` lists them).
 
 ## Install
 

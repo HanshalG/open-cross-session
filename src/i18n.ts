@@ -179,7 +179,7 @@ interface Catalog {
 }
 
 const en: Catalog = {
-  help: `ocs — cross-agent, cross-session coordination on one machine. No server.
+  help: `ocs — AI agents message and wake each other: on one machine, and across paired computers on your LAN. No server.
 
 Usage:
   ocs who [--verbose | --json]
@@ -225,7 +225,7 @@ Usage:
       Install the ocs skill for Claude, Codex, and Pi, plus Pi's direct-wake extension.
   ocs upgrade [--check | --party]
       Upgrade the ocs binary to the latest GitHub Release. --check only reports;
-      --party prints the migration guide to hosted Agent Party (cross-machine channels).
+      --party prints the migration guide to hosted Agent Party (cross-network, cross-org channels).
 ${lanMessages("en").help}
   ocs version | help
 
@@ -348,13 +348,13 @@ Data directory: ~/.ocs (override with OCS_HOME). Language: OCS_LANG=en|zh.`,
   doctorDataUnsafe: (path, mode) =>
     `${path} permissions are ${mode}; other local users may access ocs state — run \`ocs doctor --fix\``,
   doctorDataNotDirectory: (path) => `${path} is not a usable data directory`,
-  upgrade: `From local to hosted Agent Party (cross-machine, cross-org channels, same habits):
+  upgrade: `From local to hosted Agent Party (cross-network, cross-org channels, same habits):
 
   1. Install:   curl -fsSL https://agentparty.leeguoo.com/install.sh | sh
   2. Channel:   create one at https://agentparty.leeguoo.com and grab the party join snippet
   3. History:   optionally export with \`ocs read <channel> --as migrator --peek --json\` and replay via party send
 
-Local ocs and hosted party coexist fine: same-machine work stays on ocs, cross-machine goes party.`,
+Local ocs and hosted party coexist fine: your machine and your LAN (\`ocs lan\`) stay on ocs; other networks, teams and orgs go party.`,
   upgradeChecking: "checking the latest GitHub Release…",
   upgradeCurrent: (version) => `ocs ${version} is already the latest release`,
   upgradeBehind: (current, latest) => `ocs ${current} is behind the latest release ${latest}`,
@@ -363,7 +363,7 @@ Local ocs and hosted party coexist fine: same-machine work stays on ocs, cross-m
   upgradeRunning: (command) => `running installer: ${command}`,
   upgradeDone: "upgrade complete — run `ocs version` to confirm",
   upgradeFailed: (code) => `installer failed (exit ${code}); the existing binary was left untouched`,
-  upgradePartyHint: "cross-machine channels? see `ocs upgrade --party` for hosted Agent Party",
+  upgradePartyHint: "other computers on your LAN: `ocs lan` (see `ocs help`); across networks or orgs: `ocs upgrade --party`",
   doctorVersion: "Version",
   doctorVersionOk: (version) => `ocs ${version} is the latest release`,
   doctorVersionBehind: (current, latest) => `ocs ${current} is behind ${latest} — run \`ocs upgrade\``,
@@ -460,7 +460,7 @@ Local ocs and hosted party coexist fine: same-machine work stays on ocs, cross-m
 };
 
 const zh: Catalog = {
-  help: `ocs — 跨 agent 的 cross-session，本机直连，零服务器
+  help: `ocs — AI agent 互相唤醒、互发消息：同一台机器上，以及局域网里配对过的电脑之间。零服务器
 
 用法:
   ocs who [--verbose | --json]
@@ -505,7 +505,7 @@ const zh: Catalog = {
       给 Claude、Codex、Pi 安装 ocs skill，并安装 Pi 直投扩展
   ocs upgrade [--check | --party]
       把 ocs 二进制升级到最新 GitHub Release。--check 只报告不安装；
-      --party 打印迁移到托管版 Agent Party（跨机器频道）的指南。
+      --party 打印迁移到托管版 Agent Party（跨网络、跨组织频道）的指南。
 ${lanMessages("zh").help}
   ocs version | help
 
@@ -619,13 +619,13 @@ ${lanMessages("zh").help}
   doctorDataFixed: (path) => `${path} 已存在且仅当前用户可访问`,
   doctorDataUnsafe: (path, mode) => `${path} 权限是 ${mode}，其他本机用户可能访问 ocs 状态——运行 \`ocs doctor --fix\``,
   doctorDataNotDirectory: (path) => `${path} 不是可用的数据目录`,
-  upgrade: `单机版到托管版 Agent Party（跨机器、跨组织频道，同一套使用习惯）：
+  upgrade: `本地版到托管版 Agent Party（跨网络、跨组织频道，同一套使用习惯）：
 
   1. 安装:  curl -fsSL https://agentparty.leeguoo.com/install.sh | sh
   2. 建频道: 打开 https://agentparty.leeguoo.com 创建频道，拿到 party join 片段
   3. 迁历史: ocs read <channel> --as migrator --peek --json 导出后用 party send 回放（可选）
 
-本地 ocs 与托管 party 可以并存：本机小事走 ocs，跨机协作走 party。`,
+本地 ocs 与托管 party 可以并存：本机和局域网（\`ocs lan\`）走 ocs，跨网络、跨团队、跨组织走 party。`,
   upgradeChecking: "正在查询 GitHub 最新 Release…",
   upgradeCurrent: (version) => `ocs ${version} 已是最新版本`,
   upgradeBehind: (current, latest) => `ocs ${current} 落后于最新版本 ${latest}`,
@@ -634,7 +634,7 @@ ${lanMessages("zh").help}
   upgradeRunning: (command) => `正在运行安装脚本：${command}`,
   upgradeDone: "升级完成——运行 `ocs version` 确认",
   upgradeFailed: (code) => `安装脚本失败（退出码 ${code}），现有二进制未改动`,
-  upgradePartyHint: "需要跨机器频道？看 `ocs upgrade --party` 了解托管版 Agent Party",
+  upgradePartyHint: "局域网里的其他电脑：`ocs lan`（见 `ocs help`）；跨网络、跨组织：`ocs upgrade --party`",
   doctorVersion: "版本",
   doctorVersionOk: (version) => `ocs ${version} 已是最新版本`,
   doctorVersionBehind: (current, latest) => `ocs ${current} 落后于 ${latest}——运行 \`ocs upgrade\``,

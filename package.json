@@ -1,7 +1,7 @@
 {
   "name": "open-cross-session",
-  "version": "0.6.4",
-  "description": "跨 agent 的 cross-session，本机直连，零服务器 — local-first personal agent party",
+  "version": "0.6.5",
+  "description": "AI agents (Claude Code, Codex, Pi) message and wake each other — on one machine and across paired computers on your LAN. No server.",
   "license": "MIT",
   "type": "module",
   "bin": {

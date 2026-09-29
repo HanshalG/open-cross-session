@@ -2,7 +2,7 @@
 
 ## 项目一句话
 
-本地无服务器版 agent party：同机 Claude Code ↔ Codex 互相唤醒/互发消息（`ocs` CLI），向托管版 [Agent Party](https://agentparty.leeguoo.com) 引流。架构与决策记录在 **DESIGN.md**（必读），组件出处细节在 **docs/agentparty-extraction-map.md**。
+本地无服务器版 agent party：Claude Code ↔ Codex ↔ Pi 互相唤醒/互发消息（`ocs` CLI），同机直连，局域网内配对的电脑之间也能互通（v0.6 起，docs/lan.md），向托管版 [Agent Party](https://agentparty.leeguoo.com) 引流。架构与决策记录在 **DESIGN.md**（必读），组件出处细节在 **docs/agentparty-extraction-map.md**。
 
 ## 常用命令
 

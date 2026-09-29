@@ -59,3 +59,15 @@ test("macOS CI signs the compiled binary before its smoke test", () => {
   expect(verify).toBeGreaterThan(sign);
   expect(smoke).toBeGreaterThan(verify);
 });
+
+test("every release carries notes from CHANGELOG.md (no more empty release pages)", () => {
+  const workflow = readFileSync(join(import.meta.dir, "..", ".github", "workflows", "release.yml"), "utf8");
+  expect(workflow).not.toContain('--notes ""');
+  expect(workflow.match(/--notes-file release-notes\.md/g)?.length).toBeGreaterThanOrEqual(4);
+  const { spawnSync } = require("node:child_process") as typeof import("node:child_process");
+  const version = JSON.parse(readFileSync(join(import.meta.dir, "..", "package.json"), "utf8")).version;
+  const notes = spawnSync("sh", ["scripts/release-notes.sh", `v${version}`], { cwd: join(import.meta.dir, ".."), encoding: "utf8" });
+  expect(notes.status).toBe(0);
+  expect(notes.stdout).toContain("install.ps1");
+  expect(spawnSync("sh", ["scripts/release-notes.sh", "v99.0.0"], { cwd: join(import.meta.dir, ".."), encoding: "utf8" }).status).toBe(1);
+});

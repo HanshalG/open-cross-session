@@ -375,6 +375,32 @@ export async function printLanWho(ctx: Pick<LanCliContext, "lang" | "fail">, onl
   }
 }
 
+/** `ocs doctor` 的局域网一节：没开时给入口，开着时报对端数和自启。 */
+export function doctorLanSection(
+  lang: Lang,
+  selfCommand: readonly string[],
+  report: { ok(line: string): void; warn(line: string): void; info(line: string): void; bad(line: string): void },
+): void {
+  const L = lanMessages(lang);
+  console.log(L.doctorHeader);
+  let peers: number;
+  try {
+    peers = listPeers().length;
+  } catch (error) {
+    report.bad(L.stateError(error instanceof Error ? error.message : String(error)));
+    return;
+  }
+  const state = liveDaemonState();
+  if (state === null) {
+    report.info(peers > 0 ? `${L.statusStopped}` : L.doctorOff);
+    return;
+  }
+  report.ok(L.doctorRunning(state.name, state.port, peers));
+  if (peers === 0) report.info(L.doctorNoPeers);
+  const plan = autostartPlan(process.platform, selfCommand);
+  if (plan !== null && autostartState(plan) !== "on") report.warn(L.doctorAutostartOff);
+}
+
 export function lanPeerCount(): number {
   try {
     return listPeers().length;

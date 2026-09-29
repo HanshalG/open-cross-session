@@ -1,6 +1,6 @@
 # Open Cross-session
 
-**Cross-agent, cross-session coordination for Claude Code, Codex, Pi, and terminal TUIs on one machine. No server.**
+**Claude Code, Codex, Pi, and terminal agents message and wake each other — on one machine, and across the computers on your LAN (macOS, Linux, Windows). No server, no account.**
 
 [![ci](https://github.com/leeguooooo/open-cross-session/actions/workflows/ci.yml/badge.svg)](https://github.com/leeguooooo/open-cross-session/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/leeguooooo/open-cross-session)](https://github.com/leeguooooo/open-cross-session/releases)
@@ -8,7 +8,28 @@
 
 [中文文档](./README.zh-CN.md)
 
-`ocs` gives every AI coding session on your machine a shared message channel, and wakes the target session for real instead of only writing a file. Claude Code sessions, ChatGPT Desktop tasks, Pi TUIs, and terminal agents all speak through the same append-only local log.
+`ocs` gives every AI coding session a shared message channel, and wakes the target session for real instead of only writing a file. Claude Code sessions, ChatGPT Desktop tasks, Pi TUIs, and terminal agents all speak through the same append-only local log — and since 0.6, a Claude on your Mac can hand work to a Claude or Codex on your Windows box down the hall.
+
+## New in 0.6: agents across your computers
+
+```bash
+# machine A                         # machine B
+ocs lan up                          ocs lan up
+ocs lan pair   # prints a code  →   ocs lan pair 7K2M-9QXD-…
+                                    ocs who --lan
+                                    ocs dm claude-1a2b3c4d@mini "can you run the Windows build?"
+```
+
+The session on A wakes with the message and a `Reply:` line that routes straight back. Verified Mac ↔ Windows
+(Claude Code 2.1 and ChatGPT Desktop Codex on both sides).
+
+- **Finds each other** on the LAN (multicast + subnet broadcast); `--addr` when the network blocks both.
+- **Pair once, no trust-on-first-use:** the one-time code carries the issuer's key fingerprint.
+- **Mutually authenticated and encrypted:** Ed25519 identities, signed X25519 handshake, AES-256-GCM, forward secrecy.
+  Unpaired machines can only redeem a live code — nothing else.
+- **Off by default.** `ocs lan up` starts it; `ocs lan autostart on` keeps it across logins.
+
+Protocol and threat model: [docs/lan.md](./docs/lan.md). Setup details: [Cross-machine](#cross-machine).
 
 Native cross-session messaging stops at the product boundary. `ocs` adds the pieces needed when agents from different products must work together:
 
@@ -19,9 +40,9 @@ Native cross-session messaging stops at the product boundary. `ocs` adds the pie
 - **One roster and one workflow:** `ocs who`, `ocs dm`, automatic sender detection, bundled skills, and `ocs doctor` work across all supported harnesses.
 - **Safer delivery behavior:** Pi queues messages behind a busy turn, cmux never types into a busy TUI, self-wakes are suppressed, and unknown IPC outcomes are reported without retrying and risking duplicates.
 - **Local by default:** no daemon, account, API key, or server; one static binary and files under `~/.ocs`.
-- **Opt-in LAN:** `ocs lan up` + a one-time pairing code lets agents on two machines in the same network DM each other (`ocs dm claude-1a2b3c4d@mini …`) over a mutually authenticated, encrypted link. Off by default; unpaired machines get nothing.
+- **Across your LAN:** paired computers reach each other's agents as `<address>@<peer>`; see above.
 
-When one machine stops being enough, the same habits carry over to [Agent Party](https://github.com/leeguooooo/agentparty), a team integration and coordination solution for cross-machine, cross-org channels. Use the hosted service, or [self-host it](https://github.com/leeguooooo/agentparty) within Cloudflare's Free plan quotas.
+When your LAN stops being enough — different networks, a team, other organizations — the same habits carry over to [Agent Party](https://github.com/leeguooooo/agentparty), a team integration and coordination solution for cross-machine, cross-org channels. Use the hosted service, or [self-host it](https://github.com/leeguooooo/agentparty) within Cloudflare's Free plan quotas.
 
 ## Name your sessions
 
@@ -209,9 +230,9 @@ bridge between them, plus what neither provides:
 
 | | Claude native cross-session | Codex native cross-task | ocs | [Agent Party](https://github.com/leeguooooo/agentparty) |
 |---|---|---|---|---|
-| Reach | claude ↔ claude (local + cross-machine) | codex ↔ codex (inside ChatGPT Desktop) | any ↔ any on one machine (Claude, Codex, Pi, terminal TUIs) | any ↔ any across machines and organizations |
-| Best fit | direct Claude session handoff | direct ChatGPT task handoff | personal, single-machine cross-vendor coordination | team integration across machines and organizations |
-| Cross-vendor | — | — | ✅ local bridge | ✅ cross-vendor channels |
+| Reach | claude ↔ claude (local + cross-machine) | codex ↔ codex (inside ChatGPT Desktop) | any ↔ any on one machine and across paired LAN machines (Claude, Codex, Pi, terminal TUIs) | any ↔ any across networks and organizations |
+| Best fit | direct Claude session handoff | direct ChatGPT task handoff | personal cross-vendor coordination, on one machine or across your LAN | team integration across machines and organizations |
+| Cross-vendor | — | — | ✅ local + LAN bridge | ✅ cross-vendor channels |
 | Multi-party | agent teams (same harness) | task @ mentions | ✅ local agents + humans | ✅ hosted agents + humans |
 | Offline delivery | live sessions only | open tasks only | ◐ messages persist in the local channel* | ✅ persistent channel history + directed delivery |
 | Shared history / audit | per-session transcripts | per-task | ✅ append-only log, seq-referenced receipts, replayable | ✅ server-backed history, receipts, task and decision ledgers |
@@ -304,9 +325,9 @@ For cross-network or cross-org coordination and shared multi-party channels, use
 
 | | Open Cross-session | [Agent Party](https://github.com/leeguooooo/agentparty) |
 |---|---|---|
-| Best for | personal use and single-machine coordination | team integration and shared channels |
+| Best for | personal use: your agents on one machine and your computers on one LAN | team integration and shared channels |
 | Deployment | none — a single binary | hosted service, or [self-hosted](https://github.com/leeguooooo/agentparty) on Cloudflare |
-| Scope | one machine, many agents; paired machines on one LAN | cross-machine, cross-org |
+| Scope | one machine, many agents; paired machines on one LAN | across networks and organizations |
 | Transport | local sockets + JSONL log | Cloudflare Workers + Durable Objects |
 | Included coordination | local channels, unified roster, direct wake, idle notifications | directed delivery, leases, presence, tasks, web UI |
 
