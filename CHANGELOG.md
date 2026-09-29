@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.3
+
+- Windows：`ocs doctor` 把 `codex queue` 标成「Windows 上不走」而不是警告（没有 lsof 证明任务活着，Desktop 任务走 IPC）；`ocs upgrade` 打印实际运行的 `install.ps1` 命令
+- 真机确认：Windows 上 `ocs who` 能列出 ChatGPT Desktop 认领的 Codex 任务（`\\.\pipe\codex-ipc`）
+
 ## 0.6.2
 
 - 加入 use-family 家族（leeguooooo/plugins）：`ocs upgrade --check` 输出统一成 `ocs <当前> -> <最新>` / `ocs <当前> is up to date`，新增 `--json`，查不到最新版退出码 2；升级后刷新 Claude 插件 / git 检出里的 skill；每天最多一次在 stderr 提示新版本（缓存过期时后台查，不拖慢 send/dm；`CI`、`OCS_NO_UPDATE_CHECK`、`USE_NO_UPDATE_CHECK` 关闭）

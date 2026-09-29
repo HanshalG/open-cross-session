@@ -74,6 +74,7 @@ interface Catalog {
   doctorCodex: string;
   doctorCodexQueueOk: string;
   doctorCodexQueueMissing: string;
+  doctorCodexQueueWindows: string;
   doctorIpcOk: (path: string) => string;
   doctorIpcMissing: (path: string) => string;
   doctorIpcRouteOk: string;
@@ -317,6 +318,7 @@ Data directory: ~/.ocs (override with OCS_HOME). Language: OCS_LANG=en|zh.`,
   doctorCodex: "Codex side (`codex queue` preferred; Desktop IPC is the fallback)",
   doctorCodexQueueOk:
     "`codex queue` available — terminal Codex TUIs are wakeable without cmux or ChatGPT Desktop",
+  doctorCodexQueueWindows: "`codex queue` is not used on Windows (no lsof to prove a task is live); Desktop tasks go through Desktop IPC below",
   doctorCodexQueueMissing:
     "`codex queue` unavailable (no codex CLI on PATH, or too old): only ChatGPT Desktop IPC / cmux remain",
   doctorIpcOk: (path) => `Desktop IPC router socket available (${path})`,
@@ -589,6 +591,7 @@ ${lanMessages("zh").help}
   doctorCodex: "Codex 侧（首选 `codex queue`，Desktop IPC 为降级）",
   doctorCodexQueueOk:
     "`codex queue` 可用——终端里的 Codex TUI 无需 cmux、无需 ChatGPT Desktop 即可唤醒",
+  doctorCodexQueueWindows: "Windows 上不走 `codex queue`（没有 lsof 证明任务活着）；Desktop 里的任务走下面的 Desktop IPC",
   doctorCodexQueueMissing:
     "`codex queue` 不可用（PATH 上没有 codex，或版本过旧）：只剩 ChatGPT Desktop IPC / cmux",
   doctorIpcOk: (path) => `Desktop IPC 路由 socket 存在（${path}）`,

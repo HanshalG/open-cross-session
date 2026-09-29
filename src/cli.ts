@@ -103,6 +103,7 @@ import {
 } from "./wake.ts";
 import {
   checkUpgrade,
+  OCS_INSTALL_PS1_URL,
   OCS_INSTALL_SCRIPT_URL,
   OCS_UPGRADE_INSTALLER_ENV,
   detectSkillChannels,
@@ -114,7 +115,7 @@ import {
   upgradeCheckEnabled,
 } from "./upgrade.ts";
 
-export const OCS_VERSION = "0.6.2";
+export const OCS_VERSION = "0.6.3";
 
 const LANG = detectLang();
 const M = messages(LANG);
@@ -981,7 +982,11 @@ async function cmdUpgrade(parsed: Parsed): Promise<void> {
   console.log(M.upgradeBehind(check.current, check.latest));
   // installer 自带 sha256 校验 + 冒烟 + 原子替换；失败时现有二进制不受影响。
   const local = process.env[OCS_UPGRADE_INSTALLER_ENV];
-  console.log(M.upgradeRunning(local ? `sh ${local}` : `curl -fsSL ${OCS_INSTALL_SCRIPT_URL} | sh`));
+  console.log(M.upgradeRunning(
+    local ? `sh ${local}`
+      : process.platform === "win32" ? `irm ${OCS_INSTALL_PS1_URL} | iex`
+      : `curl -fsSL ${OCS_INSTALL_SCRIPT_URL} | sh`,
+  ));
   const run = runInstaller();
   if (run.code === 0) {
     // 约定 §3：二进制换了，别处拷贝/检出/插件里的 SKILL.md 不会跟着动，逐个刷新。
@@ -1052,7 +1057,8 @@ async function cmdDoctor(parsed: Parsed): Promise<void> {
   // Desktop IPC 是私有协议降级路径，它不可用不再等于「codex 不可达」。
   // doctor 用完整探测（真起一次 codex queue --help）：热路径只做 PATH 检查图快，
   // 诊断这里愿意为准确性付那半秒。
-  if (codexQueueSupported()) ok(M.doctorCodexQueueOk);
+  if (process.platform === "win32") console.log(`  ｰ  ${M.doctorCodexQueueWindows}`);
+  else if (codexQueueSupported()) ok(M.doctorCodexQueueOk);
   else warn(M.doctorCodexQueueMissing);
   const ipcAvailable = codexDesktopIpcAvailable();
   if (ipcAvailable) {
