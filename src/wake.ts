@@ -27,7 +27,9 @@ import {
   CodexDesktopIpcUnavailableError,
   CodexDesktopIpcUnknownOutcomeError,
   CODEX_OWNER_PROBE_TIMEOUT_MS,
-  codexDesktopIpcAvailable,
+  CodexDesktopIpcPipeRefusedError,
+  codexDesktopIpcStatus,
+  type CodexDesktopIpcPlatform,
 } from "./codex-ipc.ts";
 import { codexSessionsRoot, isCodexThreadId, listCodexSessions } from "./codex-sessions.ts";
 import { messages } from "./i18n.ts";
@@ -430,13 +432,20 @@ export async function wakeCodexTask(input: WakeInput & {
   sourceThreadId?: string;
   /** Internal/test override; live CLI uses the short owner-probe deadline. */
   ownerDiscoveryTimeoutMs?: number;
+  /** Test override: platform + Windows pipe API. */
+  ipcPlatform?: CodexDesktopIpcPlatform;
 }): Promise<CodexWakeResult> {
   const env = input.env ?? process.env;
   if (!isCodexThreadId(input.targetThreadId)) {
     return { ok: false, reason: "bad-thread-id", detail: input.targetThreadId };
   }
-  if (!codexDesktopIpcAvailable(env)) {
-    return { ok: false, reason: "unavailable", detail: "ChatGPT Desktop IPC socket unavailable (is the Desktop app running?)" };
+  const ipc = codexDesktopIpcStatus(env, input.ipcPlatform);
+  if (!ipc.available) {
+    return {
+      ok: false,
+      reason: "unavailable",
+      detail: `ChatGPT Desktop IPC unavailable (is the Desktop app running?): ${ipc.reason}`,
+    };
   }
   if (input.sourceThreadId !== undefined &&
       (!isCodexThreadId(input.sourceThreadId) ||
@@ -446,9 +455,19 @@ export async function wakeCodexTask(input: WakeInput & {
   const client = new CodexDesktopIpcClient({
     env,
     requestTimeoutMs: input.ownerDiscoveryTimeoutMs ?? CODEX_OWNER_PROBE_TIMEOUT_MS,
+    ...input.ipcPlatform,
   });
   try {
-    await client.connect();
+    try {
+      await client.connect();
+    } catch (error) {
+      // Windows：这条连接的管道服务端没过身份校验（探测之后被人抢注也走到这里）。什么都没
+      // 发出去，按 unavailable 走降级，不算传输故障。
+      if (error instanceof CodexDesktopIpcPipeRefusedError) {
+        return { ok: false, reason: "unavailable", detail: `ChatGPT Desktop IPC unavailable: ${error.message}` };
+      }
+      throw error;
+    }
     const sourceCandidates = input.sourceThreadId === undefined
       ? listCodexSourceCandidates(input.targetThreadId, env)
       : [input.sourceThreadId];

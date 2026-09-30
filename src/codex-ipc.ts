@@ -4,7 +4,8 @@
  * Vendored from AgentParty cli/src/codex-desktop-ipc.ts（同一版权人，按 MIT 重新授权
  * 随本仓库分发；本文件不是 canonical）。相对上游的改动：去掉与 AgentParty 会话注册表
  * 耦合的 selectCodexDesktopIpcRoute / validateCodexDesktopIpcRoute（ocs 的路由选择在
- * wake.ts 里用 discoverThreadOwner 同 renderer 校验实现）；clientType 默认改为 "ocs"。
+ * wake.ts 里用 discoverThreadOwner 同 renderer 校验实现）；clientType 默认改为 "ocs"；
+ * Windows 命名管道支持（服务端身份校验在 codex-ipc-win.ts，回流中：AgentParty#1132）。
  *
  * ⚠️ 依赖 ChatGPT.app 私有 IPC 协议（方法名 / clientId 握手 / toolOutput 形状），
  * 宿主版本升级可能破——失败路径必须留降级余地，绝不重放（unknown-outcome 是一等错误）。
@@ -16,10 +17,17 @@
  * cross-task label and source link without touching the private app-tools pipe.
  */
 import { randomUUID } from "node:crypto";
-import { lstatSync, readdirSync } from "node:fs";
+import { lstatSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { createConnection, type Socket } from "node:net";
+import { createConnection } from "node:net";
+import {
+  openVerifiedCodexPipe,
+  WindowsPipeStream,
+  type WindowsPipeApi,
+  type WindowsPipeHandle,
+  type WindowsPipeServerFacts,
+} from "./codex-ipc-win.ts";
 
 const MAX_IPC_FRAME_BYTES = 64 * 1024 * 1024;
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
@@ -45,6 +53,14 @@ export class CodexDesktopIpcUnavailableError extends Error {
   }
 }
 
+/** Windows：管道打不开或服务端身份没过关。抛出时一个字节都没写出去，可以安全降级。 */
+export class CodexDesktopIpcPipeRefusedError extends CodexDesktopIpcUnavailableError {
+  constructor(message: string) {
+    super(message);
+    this.name = "CodexDesktopIpcPipeRefusedError";
+  }
+}
+
 export class CodexDesktopIpcRequestError extends Error {
   constructor(message: string) {
     super(message);
@@ -66,29 +82,39 @@ function object(value: unknown): value is Record<string, unknown> {
 /** Windows 上 ChatGPT Desktop 的 IPC 是全局命名空间的命名管道（2026-09-29 实测 OpenAI.Codex 26.924）。 */
 export const CODEX_WINDOWS_IPC_PIPE = "\\\\.\\pipe\\codex-ipc";
 
+/** 测试注入点：平台与 Windows 管道 API。线上不传，取真实平台。 */
+export interface CodexDesktopIpcPlatform {
+  platform?: NodeJS.Platform;
+  windowsPipeApi?: WindowsPipeApi;
+}
+
 export function codexDesktopIpcSocketPath(
   env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
 ): string {
-  if (process.platform === "win32") return env.OCS_CODEX_IPC_PIPE?.trim() || CODEX_WINDOWS_IPC_PIPE;
+  // OCS_CODEX_IPC_PIPE 只换管道名，不换信任规则：换了名字的管道照样要过服务端身份校验。
+  if (platform === "win32") return env.OCS_CODEX_IPC_PIPE?.trim() || CODEX_WINDOWS_IPC_PIPE;
   const codexHome = env.CODEX_HOME?.trim() || join(homedir(), ".codex");
   return join(codexHome, "ipc", "ipc.sock");
 }
 
-export function validateCodexDesktopIpcSocket(path: string): void {
-  if (process.platform === "win32") {
-    // 命名管道没有 uid / mode 可查，访问控制在管道自己的 ACL 上（Desktop 创建）。这里只确认
-    // 管道确实存在，免得对一个不存在的名字空连一次。（ocs 新增；**未回流**：只凭管道存在即信任，
-    // 上游要求先校验管道服务端身份，见 AgentParty#1132 与本仓库 #37）
-    const name = path.replace(/^\\\\\.\\pipe\\/i, "");
-    let pipes: string[];
-    try {
-      pipes = readdirSync("\\\\.\\pipe\\");
-    } catch {
-      throw new CodexDesktopIpcUnavailableError("cannot list named pipes");
-    }
-    if (!pipes.some((pipe) => pipe.toLowerCase() === name.toLowerCase())) {
-      throw new CodexDesktopIpcUnavailableError(`ChatGPT Desktop IPC pipe is missing: ${path}`);
-    }
+/**
+ * Windows：打开管道并在这条连接上校验服务端身份（属主 SID、服务端进程的用户与 ChatGPT Desktop
+ * 包身份，见 codex-ipc-win.ts）。不过关就关句柄抛 unavailable——此时一个字节都没写出去。
+ */
+function openVerifiedWindowsPipe(
+  path: string,
+  deps: CodexDesktopIpcPlatform,
+): { handle: WindowsPipeHandle; facts: WindowsPipeServerFacts } {
+  const verified = openVerifiedCodexPipe(path, deps.windowsPipeApi);
+  if (!verified.ok) throw new CodexDesktopIpcPipeRefusedError(verified.reason);
+  return verified;
+}
+
+export function validateCodexDesktopIpcSocket(path: string, deps: CodexDesktopIpcPlatform = {}): void {
+  if ((deps.platform ?? process.platform) === "win32") {
+    // 探测连接：校验完立刻关，不发任何帧。真正发帧的连接在 connect() 里再校验它自己。
+    openVerifiedWindowsPipe(path, deps).handle.close();
     return;
   }
   let socket;
@@ -111,15 +137,41 @@ export function validateCodexDesktopIpcSocket(path: string): void {
   }
 }
 
+export type CodexDesktopIpcStatus =
+  | { available: true; path: string; server?: WindowsPipeServerFacts }
+  | { available: false; path: string; reason: string };
+
+/** 可用性 + 不可用的原因（doctor 和唤醒失败文案用）。Windows 上带回通过校验的服务端身份。 */
+export function codexDesktopIpcStatus(
+  env: NodeJS.ProcessEnv = process.env,
+  deps: CodexDesktopIpcPlatform = {},
+): CodexDesktopIpcStatus {
+  const platform = deps.platform ?? process.platform;
+  const path = codexDesktopIpcSocketPath(env, platform);
+  try {
+    if (platform === "win32") {
+      const { handle, facts } = openVerifiedWindowsPipe(path, deps);
+      handle.close();
+      return { available: true, path, server: facts };
+    }
+    validateCodexDesktopIpcSocket(path, deps);
+    return { available: true, path };
+  } catch (error) {
+    return { available: false, path, reason: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 export function codexDesktopIpcAvailable(
   env: NodeJS.ProcessEnv = process.env,
+  deps: CodexDesktopIpcPlatform = {},
 ): boolean {
-  try {
-    validateCodexDesktopIpcSocket(codexDesktopIpcSocketPath(env));
-    return true;
-  } catch {
-    return false;
-  }
+  return codexDesktopIpcStatus(env, deps).available;
+}
+
+/** 连接的最小面：Unix 是 net.Socket，Windows 是校验过身份的管道句柄。 */
+interface IpcStream {
+  write(frame: Buffer): void;
+  destroy(): void;
 }
 
 function escapeXml(value: string): string {
@@ -159,7 +211,7 @@ interface ConversationState {
   state: Record<string, unknown>;
 }
 
-export interface CodexDesktopIpcClientOptions {
+export interface CodexDesktopIpcClientOptions extends CodexDesktopIpcPlatform {
   env?: NodeJS.ProcessEnv;
   clientType?: string;
   requestTimeoutMs?: number;
@@ -196,7 +248,7 @@ export interface CodexDesktopIpcTransport {
 }
 
 export class CodexDesktopIpcClient implements CodexDesktopIpcTransport {
-  private socket: Socket | null = null;
+  private socket: IpcStream | null = null;
   private clientId = INITIALIZING_CLIENT_ID;
   private pending = new Map<string, PendingRequest>();
   private incoming = Buffer.alloc(0);
@@ -209,9 +261,11 @@ export class CodexDesktopIpcClient implements CodexDesktopIpcTransport {
   private readonly connectTimeoutMs: number;
   private readonly startTurnTimeoutMs: number;
   private readonly clientType: string;
+  private readonly deps: CodexDesktopIpcPlatform;
 
   constructor(options: CodexDesktopIpcClientOptions = {}) {
-    this.socketPath = codexDesktopIpcSocketPath(options.env ?? process.env);
+    this.deps = { platform: options.platform ?? process.platform, windowsPipeApi: options.windowsPipeApi };
+    this.socketPath = codexDesktopIpcSocketPath(options.env ?? process.env, this.deps.platform);
     this.timeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.startTurnTimeoutMs = options.startTurnTimeoutMs ?? 30_000;
@@ -220,7 +274,28 @@ export class CodexDesktopIpcClient implements CodexDesktopIpcTransport {
 
   async connect(): Promise<void> {
     if (this.socket !== null) return;
-    validateCodexDesktopIpcSocket(this.socketPath);
+    if (this.deps.platform === "win32") {
+      // 校验的就是随后发帧的这条连接：没有「查的是 A、连的是 B」的窗口。不过关直接抛
+      // unavailable，initialize 帧也不会写出去。
+      const { handle } = openVerifiedWindowsPipe(this.socketPath, this.deps);
+      this.socket = new WindowsPipeStream(
+        handle,
+        (chunk) => this.handleData(chunk),
+        (error) => this.handleClose(error),
+      );
+    } else {
+      await this.connectUnixSocket();
+    }
+    const response = await this.request("initialize", 0, { clientType: this.clientType }, { timeoutMs: this.connectTimeoutMs });
+    const id = object(response.result) && typeof response.result.clientId === "string"
+      ? response.result.clientId
+      : null;
+    if (id === null) throw new CodexDesktopIpcUnavailableError(`ChatGPT Desktop IPC initialize failed`);
+    this.clientId = id;
+  }
+
+  private async connectUnixSocket(): Promise<void> {
+    validateCodexDesktopIpcSocket(this.socketPath, this.deps);
     const socket = createConnection(this.socketPath);
     this.socket = socket;
     socket.on("data", (chunk) => this.handleData(Buffer.from(chunk)));
@@ -231,12 +306,6 @@ export class CodexDesktopIpcClient implements CodexDesktopIpcTransport {
       socket.once("connect", () => { clearTimeout(timer); resolve(); });
       socket.once("error", (error) => { clearTimeout(timer); reject(error); });
     });
-    const response = await this.request("initialize", 0, { clientType: this.clientType }, { timeoutMs: this.connectTimeoutMs });
-    const id = object(response.result) && typeof response.result.clientId === "string"
-      ? response.result.clientId
-      : null;
-    if (id === null) throw new CodexDesktopIpcUnavailableError(`ChatGPT Desktop IPC initialize failed`);
-    this.clientId = id;
   }
 
   async discoverThreadOwner(threadId: string, hostId: string = "local"): Promise<string> {
@@ -389,7 +458,11 @@ export class CodexDesktopIpcClient implements CodexDesktopIpcTransport {
       } catch (error) {
         clearTimeout(timer);
         this.pending.delete(requestId);
-        reject(error);
+        // 同步写（Windows 管道句柄）可能写到一半才失败：start-turn 帧只要可能出去过一个字节，
+        // 结果就是未知，不是「没发」。
+        reject(method === "thread-follower-start-turn"
+          ? new CodexDesktopIpcUnknownOutcomeError(`ChatGPT IPC start-turn write failed: ${String(error)}`)
+          : error);
       }
     }).then((response) => {
       if (response.resultType !== "success") {

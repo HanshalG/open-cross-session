@@ -85,6 +85,8 @@ interface Catalog {
   doctorCodexQueueWindows: string;
   doctorIpcOk: (path: string) => string;
   doctorIpcMissing: (path: string) => string;
+  doctorIpcPipeVerified: (path: string, pid: number | null, image: string | null) => string;
+  doctorIpcPipeRefused: (reason: string) => string;
   doctorIpcRouteOk: string;
   doctorIpcRouteMissing: (thread: string) => string;
   doctorIpcRouteProbeFailed: (detail: string) => string;
@@ -351,6 +353,10 @@ Data directory: ~/.ocs (override with OCS_HOME). Language: OCS_LANG=en|zh.`,
     "`codex queue` unavailable (no codex CLI on PATH, or too old): only ChatGPT Desktop IPC / cmux remain",
   doctorIpcOk: (path) => `Desktop IPC router socket available (${path})`,
   doctorIpcMissing: (path) => `Desktop IPC unavailable (${path} missing or wrong perms) — is ChatGPT Desktop running?`,
+  doctorIpcPipeVerified: (path, pid, image) =>
+    `Desktop IPC pipe passed the identity check (${path}): served by ChatGPT Desktop, pid ${pid ?? "?"}, ${image ?? "?"}, same user`,
+  doctorIpcPipeRefused: (reason) =>
+    `Desktop IPC pipe not used — ${reason}. ocs only talks to a pipe served by ChatGPT Desktop running as you; messages stay in the inbox`,
   doctorIpcRouteOk: "this Codex task is claimed by an open Desktop renderer (wakeable)",
   doctorIpcRouteMissing: (thread) =>
     `this Codex task (${thread.slice(0, 8)}) is not claimed by an open Desktop renderer; stored messages still appear in \`ocs inbox\`, but wake needs its task view open/selected`,
@@ -641,6 +647,10 @@ ${lanMessages("zh").help}
     "`codex queue` 不可用（PATH 上没有 codex，或版本过旧）：只剩 ChatGPT Desktop IPC / cmux",
   doctorIpcOk: (path) => `Desktop IPC 路由 socket 存在（${path}）`,
   doctorIpcMissing: (path) => `Desktop IPC 不可用（${path} 缺失或权限不对）——ChatGPT Desktop 开着吗？`,
+  doctorIpcPipeVerified: (path, pid, image) =>
+    `Desktop IPC 管道通过身份校验（${path}）：服务端是 ChatGPT Desktop，pid ${pid ?? "?"}，${image ?? "?"}，与你同一用户`,
+  doctorIpcPipeRefused: (reason) =>
+    `Desktop IPC 管道不用——${reason}。ocs 只跟「以你的身份运行的 ChatGPT Desktop」提供的管道通信，消息留在收件箱`,
   doctorIpcRouteOk: "当前 Codex task 已被打开的 Desktop renderer 认领（可唤醒）",
   doctorIpcRouteMissing: (thread) =>
     `当前 Codex task（${thread.slice(0, 8)}）未被打开的 Desktop renderer 认领；持久消息仍会进入 \`ocs inbox\`，但主动唤醒需要打开或选中该 task 页面`,

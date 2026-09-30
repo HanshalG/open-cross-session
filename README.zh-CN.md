@@ -318,6 +318,8 @@ Claude Code 自带的 cross-session 已经能让 Claude 和 Claude 互发消息�
 
 支持。有 Windows x64 二进制（`irm https://raw.githubusercontent.com/leeguooooo/open-cross-session/main/install.ps1 | iex`），通过命名管道收件箱唤醒 Claude Code，通过本地 IPC 管道唤醒 ChatGPT Desktop 里的 Codex，也能加入局域网模式。
 
+Codex 的管道名（`\\.\pipe\codex-ipc`）是固定的，本机任何进程都可以抢先建出来。0.7.1 起 ocs 在即将使用的那条连接上核对管道的服务端：管道属主必须是你，服务端进程必须以你的身份运行，并且是 ChatGPT Desktop（Store 包 `OpenAI.Codex`，映像在包的安装目录里）。不满足就什么都不发，消息留在收件箱，`ocs doctor` 会写出原因。不是 Store 包的 Desktop、以管理员身份运行的 Desktop 也会被拒。
+
 ### 需要服务器、账号或 API key 吗？
 
 都不需要。ocs 是一个静态二进制，消息是 `~/.ocs` 里的 JSONL 文件。不开局域网模式时什么都不出本机；开了也只发给你配对过的电脑。

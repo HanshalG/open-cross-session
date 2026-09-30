@@ -10,8 +10,7 @@ import { basename, join } from "node:path";
 import { listNativeSessions, type NativeClaudeSession } from "./claude-inject.ts";
 import { enableCrossSessionInbound, readCrossSessionInbound } from "./claude-settings.ts";
 import {
-  codexDesktopIpcAvailable,
-  codexDesktopIpcSocketPath,
+  codexDesktopIpcStatus,
   discoverCodexDesktopOwners,
 } from "./codex-ipc.ts";
 import {
@@ -118,7 +117,7 @@ import {
   upgradeCheckEnabled,
 } from "./upgrade.ts";
 
-export const OCS_VERSION = "0.7.0";
+export const OCS_VERSION = "0.7.1";
 
 const LANG = detectLang();
 const M = messages(LANG);
@@ -1128,11 +1127,16 @@ async function cmdDoctor(parsed: Parsed): Promise<void> {
   if (process.platform === "win32") console.log(`  ｰ  ${M.doctorCodexQueueWindows}`);
   else if (codexQueueSupported()) ok(M.doctorCodexQueueOk);
   else warn(M.doctorCodexQueueMissing);
-  const ipcAvailable = codexDesktopIpcAvailable();
-  if (ipcAvailable) {
-    ok(M.doctorIpcOk(codexDesktopIpcSocketPath()));
+  const ipc = codexDesktopIpcStatus();
+  const ipcAvailable = ipc.available;
+  if (process.platform === "win32") {
+    // Windows 的管道名谁都能抢注：报的是「这条管道的服务端过没过身份校验」，不是「名字在不在」。
+    if (ipc.available) ok(M.doctorIpcPipeVerified(ipc.path, ipc.server?.serverPid ?? null, ipc.server?.serverImagePath ?? null));
+    else warn(M.doctorIpcPipeRefused(ipc.reason));
+  } else if (ipcAvailable) {
+    ok(M.doctorIpcOk(ipc.path));
   } else {
-    warn(M.doctorIpcMissing(codexDesktopIpcSocketPath()));
+    warn(M.doctorIpcMissing(ipc.path));
   }
   const currentCodexThread = process.env[CODEX_THREAD_ID_ENV];
   if (ipcAvailable && typeof currentCodexThread === "string" && isCodexThreadId(currentCodexThread)) {

@@ -88,6 +88,30 @@
    `~/.codex/ipc/ipc.sock`，用 `thread-follower-start-turn` + `codex_app`
    toolOutput 注入原生跨任务消息，UI 里保留原生来源链接。私有协议，宿主升级可能破，
    所以 Desktop 之外的目标一律不用它；它失败后依次是 cmux 按键注入、queue 兜底。
+   **Windows（v0.7.1，issue #37）**：Desktop 的 IPC 是全局命名空间里的固定管道名
+   `\\.\pipe\codex-ipc`，谁先建谁就是服务端（管道抢注），名字存在不证明任何事。Unix 上
+   查 socket 的 uid 和 0600，Windows 上对应的检查做在**随后发帧的那个句柄上**
+   （`src/codex-ipc-win.ts`，bun:ffi 调 kernel32 / advapi32，不要管理员权限）：
+   - 管道对象的属主 SID == 本进程用户 SID（`GetKernelObjectSecurity`）。这是 uid 检查的
+     对应物，也是挡别的账号的那一道：非管理员没法把属主设成别人，而且它不依赖 pid。
+   - 管道服务端进程（`GetNamedPipeServerProcessId`）以同一用户 SID 运行。
+   - 该进程带 ChatGPT Desktop 的包身份 `OpenAI.Codex_2p2nqsd0c76g0`（`GetPackageFamilyName`，
+     内核从进程令牌读），且映像在该包的安装目录里（`…\WindowsApps\OpenAI.Codex_<版本>…\`，
+     只有 TrustedInstaller 可写）。两条都要：Desktop 底下 agent 跑的命令会继承包身份，但映像
+     在包目录外。不查 Authenticode：Store 包按包签名而不是按 exe，WinVerifyTrust 也慢。
+   任何一条不过 → 关句柄、报 unavailable（走降级，消息留 inbox），**一个字节都不写**。
+   为什么必须逐连接查：真机上 Desktop 的管道是默认 DACL（SYSTEM / Administrators / 属主
+   全权，Everyone 只读），别的非管理员账号加不了实例也写不进去，但同一用户的进程可以在
+   真服务端旁边再加实例——`FILE_FLAG_FIRST_PIPE_INSTANCE` 只保护创建那一刻。所以「探测
+   过关再用 net.connect 另连一次」不成立；Bun/Node 的 net.Socket 又不给句柄，于是 Windows
+   上整条传输都跑在校验过的句柄上（`PeekNamedPipe` 轮询，2ms 起、空闲退到 50ms）。句柄用
+   `SECURITY_IDENTIFICATION` 打开（流氓服务端不能冒充我们），只接受 `\\.\pipe\…`
+   （`\\host\pipe\…` 会把凭据送上 SMB）。`OCS_CODEX_IPC_PIPE` 只换名字不换规则。
+   `codexDesktopIpcAvailable` 是一次「开、查、关」的探测，不发帧；不缓存任何服务端身份。
+   **挡不住的**：已经以同一用户运行的恶意进程（它可以直接注入 Desktop），以及理论上的
+   pid 复用（第 2、3 条依赖 pid，第 1 条不依赖）。**已知会误拒**：非 Store 安装的
+   Desktop（没有包身份）、以管理员身份运行的 Desktop（属主变成 Administrators）——都按
+   fail closed 处理，`ocs doctor` 会写出拒绝原因。
 3. **补充**：Codex Stop hook 的 `{"decision":"block","reason":…}` —
    `reason` 即注入 prompt（≤512B），机制全本地，只有「有没有新消息」一问走服务端。
 4. **Pi 侧**：全局扩展在 `session_start` 登记会话并监听 0600 Unix socket；收到 note 后用

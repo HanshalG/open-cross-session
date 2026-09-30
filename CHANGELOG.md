@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.1
+
+**Windows: ocs now checks who is serving ChatGPT Desktop's Codex pipe before sending anything (#37).** 0.6.2–0.7.0 trusted `\\.\pipe\codex-ipc` because a pipe with that name existed. Any local process that created the name first received the wake prompts and thread ids and could answer as the task owner. macOS and Linux were not affected (the socket's owner and mode were already checked).
+
+- 在即将发帧的那条连接上核对管道服务端：管道属主 SID 是当前用户；服务端进程以当前用户运行；该进程带 ChatGPT Desktop 的包身份（`OpenAI.Codex_2p2nqsd0c76g0`）且映像在包安装目录内。不满足 → 不发任何字节，按 Desktop IPC 不可用处理（消息留在收件箱，退出码 2），原因写进 `wake(codex): stored-only (unavailable): …`
+- `ocs doctor` 在 Windows 上报告管道是否通过身份校验，通过时列出服务端 pid 和映像路径，不通过时写明原因
+- `OCS_CODEX_IPC_PIPE` 指向的管道走同一套校验；只接受 `\\.\pipe\…` 形式的本机管道名
+- 会被拒的正常情形：不是 Store 包安装的 ChatGPT Desktop、以管理员身份运行的 ChatGPT Desktop
+- start-turn 帧写到一半失败按结果未知处理（退出码 3，不重发）
+- 真机验证（Windows 11，OpenAI.Codex 26.924）：真 Desktop 通过；同一用户、另一用户各起一个抢注管道，均被拒且抢注方收到 0 字节（0.6.5 对同一个抢注管道发出了 194 字节的握手帧）
+
 ## 0.7.0
 
 **Claude wakes now say whether the message was held.** `ocs dm` / `ocs send` to a Claude Code session used to print `delivered to inbox` even when the receiver's `crossSessionInbound` gate (default `hold`) parked the message and dropped it 5 minutes later. ocs now subscribes to Claude Code's native delivery receipts and reports what happened. macOS and Linux; Windows behaves as before.

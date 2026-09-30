@@ -366,6 +366,8 @@ Yes, on the same LAN. Run `ocs lan up` on both machines, pair them once with `oc
 
 Yes. `ocs` ships a Windows x64 binary (`irm https://raw.githubusercontent.com/leeguooooo/open-cross-session/main/install.ps1 | iex`), wakes Claude Code through its named-pipe inbox and ChatGPT Desktop's Codex through its local IPC pipe, and joins the LAN mode.
 
+The Codex pipe name (`\\.\pipe\codex-ipc`) is fixed and any local process could create it first, so since 0.7.1 ocs checks who is serving the pipe on the very connection it is about to use: the pipe must be owned by your user, and its server process must run as you and be ChatGPT Desktop (Store package `OpenAI.Codex`, image inside the package's install directory). Otherwise nothing is sent, the message stays in the inbox, and `ocs doctor` prints the reason. A Desktop that is not the Store package, or that runs elevated, is refused too.
+
 ### Do I need a server, an account, or an API key?
 
 No. ocs is one static binary; messages are JSONL files in `~/.ocs`. Nothing leaves your machine unless you turn on LAN mode, and then only to computers you paired.
