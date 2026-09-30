@@ -32,10 +32,27 @@ try {
   # A running LAN daemon locks ocs.exe: stop it first, restart on the new binary after.
   $RestartLan = $false
   if (Test-Path $Target) {
+    # The old binary prints its "newer release available" notice on stderr. Under
+    # $ErrorActionPreference = "Stop", Windows PowerShell 5.1 turns redirected native stderr
+    # into a terminating error, which used to skip the restart exactly when an upgrade was due.
+    $PrevPreference = $ErrorActionPreference
+    $PrevNoCheck = $env:OCS_NO_UPDATE_CHECK
     try {
-      $Status = & $Target lan status --json 2>$null | ConvertFrom-Json
-      if ($Status.running) { & $Target lan down | Out-Null; $RestartLan = $true }
-    } catch { }
+      $ErrorActionPreference = "Continue"
+      $env:OCS_NO_UPDATE_CHECK = "1"
+      $Raw = (& $Target lan status --json 2>$null) -join "`n"
+      $Status = $null
+      if ($Raw) { try { $Status = $Raw | ConvertFrom-Json } catch { } }
+      if ($Status -and $Status.running) {
+        & $Target lan down 2>$null | Out-Null
+        $RestartLan = $true
+      }
+    } catch {
+      Write-Warning "could not query the LAN daemon; if it was running, restart it with: ocs lan up"
+    } finally {
+      $ErrorActionPreference = $PrevPreference
+      $env:OCS_NO_UPDATE_CHECK = $PrevNoCheck
+    }
     # Windows can rename (not overwrite) an exe that is still mapped.
     Get-ChildItem -Path $InstallDir -Filter "ocs.exe.old-*" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
     Move-Item -Force $Target ("$Target.old-" + [DateTime]::Now.ToString("yyyyMMddHHmmss"))
@@ -53,7 +70,10 @@ try {
     & $Target skill install
     if ($LASTEXITCODE -ne 0) { Write-Warning "ocs installed, but skill setup failed; rerun: ocs skill install" }
   }
-  if ($RestartLan) { & $Target lan up }
+  if ($RestartLan) {
+    & $Target lan up
+    if ($LASTEXITCODE -ne 0) { Write-Warning "could not restart the LAN daemon; run: ocs lan up" }
+  }
   Write-Host "ok: run 'ocs doctor' to get started"
 } finally {
   Remove-Item -Recurse -Force $Tmp -ErrorAction SilentlyContinue
