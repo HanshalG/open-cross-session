@@ -180,7 +180,7 @@ The protocol is shared with Agent Party: [docs/wake-protocol.md](./docs/wake-pro
 
 Delivery honesty: the first line says `stored #<channel> seq <n>` once the append-only log commit succeeds; it does not claim wake delivery. Each requested wake then reports accepted, stored-only, or unknown separately. Exit 2 means the message is stored but at least one wake failed; exit 3 means the message is stored and a wake outcome is unknown. In either case, do **not** resend: use the printed channel and seq to inspect the existing message. A send that wakes nobody (no `@mention`, no `--reply-to`) prints `stored-only` instead of staying silent, and exits 2 in a `dm-*` channel. Mentions count after any non-address character, so `。@claude-9e6c0ae7` works. Pi acceptance means its extension queued the message.
 
-Claude targets report back through Claude Code's own delivery receipts (macOS and Linux):
+Claude targets report back through Claude Code's own delivery receipts (macOS and Linux; wire format and process model in [docs/delivery-receipts.md](./docs/delivery-receipts.md)):
 
 | Output | Exit | What it means |
 |---|---|---|

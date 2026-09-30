@@ -166,6 +166,8 @@ messagingSocketPath 都与环境变量一致且 pid 活，才算认出自己（�
 
 ## 6. 投递回执（Claude 载体，v0.7.0）
 
+> English: [delivery-receipts.md](./delivery-receipts.md)（内容跟随本节，本节是正本）。
+
 §1 的帧写进收件箱 socket 之后，还要过接收端的 `crossSessionInbound` 闸门：`accept` 直接进对话；
 `hold`（**默认值**，仓库级设置还能把用户级的 accept 收紧成 hold）进待审队列，5 分钟没人批准就丢；
 也可能被拒。v0.7.0 之前发送方分不出这几种归宿。Claude Code 自己有回执（`peer_message_status`，
