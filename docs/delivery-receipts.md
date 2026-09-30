@@ -102,5 +102,5 @@ A remote DM is woken by the daemon on the receiving machine through the same pat
 ## Not covered yet
 
 - Windows has no receipts.
-- `held` → approved → `delivered` is covered by tests against a fake inbox, not by a run against a real Claude Code approval dialog.
+- `held` → `delivered` was verified on real sessions through the policy-release path (the receiver's setting changed from `hold` to `accept` while the message was held: Claude Code released it and sent `delivered`). The interactive approval dialog, which only appears when a message is held for a permission-mode mismatch, is covered by tests against a fake inbox only.
 - A `held` receipt that arrives after the 400 ms window is missed, because the helper has already exited as `accepted`.
