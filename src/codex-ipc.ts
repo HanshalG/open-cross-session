@@ -77,7 +77,8 @@ export function codexDesktopIpcSocketPath(
 export function validateCodexDesktopIpcSocket(path: string): void {
   if (process.platform === "win32") {
     // 命名管道没有 uid / mode 可查，访问控制在管道自己的 ACL 上（Desktop 创建）。这里只确认
-    // 管道确实存在，免得对一个不存在的名字空连一次。（ocs 新增，待回流上游）
+    // 管道确实存在，免得对一个不存在的名字空连一次。（ocs 新增；**未回流**：只凭管道存在即信任，
+    // 上游要求先校验管道服务端身份，见 AgentParty#1132 与本仓库 #37）
     const name = path.replace(/^\\\\\.\\pipe\\/i, "");
     let pipes: string[];
     try {

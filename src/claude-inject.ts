@@ -5,8 +5,8 @@
 // 相对上游的改动：env 覆盖变量改名为 OCS_*；新增 listNativeSessions() 导出；
 // NativeClaudeSession 多读一个 statusUpdatedAt（notify-when-idle 算「忙了多久」用）；
 // writeFramesToSocket 成功路径也 destroy()（对端迟迟不关连接时进程不再被撑着，见函数注释；
-// 建议回流上游）；injectChannelMessage 多收一个 msgId 透传给 buildInjectFrames（回执订阅方要
-// 自己定 msg_id，见 src/claude-receipt.ts；待回流上游）。
+// 已回流上游 AgentParty#1131）；injectChannelMessage 多收一个 msgId 透传给 buildInjectFrames（回执订阅方要
+// 自己定 msg_id，见 src/claude-receipt.ts；已回流上游 AgentParty#1131）。
 //
 // 定位：本模块是「最后一公里」——
 // 把频道 @ 消息以 Claude Code 原生「Message from X」内联 UX 注入到本机已入册、当前 idle
@@ -287,7 +287,7 @@ export function readPeerToken(
   if (dir === null) return null;
   // Windows 上 Claude 按**小写**规范化后的管道路径算哈希（2.1.284 实测：
   // `\\.\pipe\LOCAL\cc-msg-…` 的 key 文件名是 `\\.\pipe\local\cc-msg-…` 的 sha256）。先试原样，
-  // Windows 再试小写。（ocs 新增，待回流上游）
+  // Windows 再试小写。（ocs 新增，已回流上游 AgentParty#1131）
   const candidates = [session.messagingSocketPath];
   if (platform() === "win32") candidates.push(session.messagingSocketPath.toLowerCase());
   for (const socketPath of candidates) {
@@ -444,7 +444,7 @@ export type InjectFailureReason =
 export function socketOwnershipFailure(sockPath: string): string | null {
   // Windows：Claude 的收件箱是命名管道 `\\.\pipe\LOCAL\cc-msg-…`，lstat 不适用。LOCAL 命名空间
   // 只对同一登录会话可见，管道 ACL 由 Claude 设；另外 Windows 上写入强制带 peer token
-  // （见 injectChannelMessage），两道一起替代 uid 校验。（ocs 新增，待回流上游）
+  // （见 injectChannelMessage），两道一起替代 uid 校验。（ocs 新增，已回流上游 AgentParty#1131；上游更严：只认 `\\.\pipe\LOCAL\<name>`）
   if (platform() === "win32") {
     return /^\\\\\.\\pipe\\/i.test(sockPath) ? null : "path is not a named pipe";
   }
@@ -499,7 +499,7 @@ export interface InjectChannelMessageInput {
   priority?: "now" | "next" | "later";
   /**
    * 帧的 msg_id。回执（peer_message_status）用 orig_msg_id 指回它，所以要订阅回执的调用方
-   * 必须自己定这个值；省略时照旧随机生成。（ocs 新增，待回流上游）
+   * 必须自己定这个值；省略时照旧随机生成。（ocs 新增，已回流上游 AgentParty#1131）
    */
   msgId?: string;
   env?: NodeJS.ProcessEnv;
