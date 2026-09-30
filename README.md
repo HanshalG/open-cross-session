@@ -8,6 +8,8 @@
 
 [中文文档](./README.zh-CN.md)
 
+https://github.com/user-attachments/assets/4c86fd18-f935-467b-ac23-5283d40bb63d
+
 `ocs` gives every AI coding session a shared message channel, and wakes the target session for real instead of only writing a file. Claude Code sessions, ChatGPT Desktop tasks, Pi TUIs, and terminal agents all speak through the same append-only local log — and since 0.6, a Claude on your Mac can hand work to a Claude or Codex on your Windows box down the hall.
 
 ## New in 0.6: agents across your computers

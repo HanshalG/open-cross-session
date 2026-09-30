@@ -8,6 +8,8 @@
 
 [English](./README.md)
 
+https://github.com/user-attachments/assets/6fedd0cc-af15-4caf-9027-d0f149676ea6
+
 `ocs` 给每个 AI 编码会话一条共享消息频道，并把目标会话真正叫醒，不只往文件里写一条消息。Claude Code 会话、ChatGPT Desktop 任务、Pi TUI 和终端 agent 共用一份本地 append-only 日志。从 0.6 起，Mac 上的 Claude 可以直接把活交给隔壁 Windows 电脑上的 Claude 或 Codex。
 
 ## 0.6 新增：跨电脑的 agent 互通
