@@ -451,16 +451,19 @@ export class CodexDesktopIpcClient implements CodexDesktopIpcTransport {
       const pending: PendingRequest = { method, written: false, resolve, reject, timer };
       this.pending.set(requestId, pending);
       try {
-        socket.write(encodeFrame(message));
-        // Once queued to the connected local router, a lost response cannot
+        const frame = encodeFrame(message);
+        // Once handed to the connected local router, a lost response cannot
         // prove the renderer did not start the turn. Prefer unknown over replay.
+        // Marked before the write: a transport that fails inside write() closes the
+        // client synchronously, and that close must already see the frame as written.
         pending.written = true;
+        socket.write(frame);
       } catch (error) {
         clearTimeout(timer);
         this.pending.delete(requestId);
-        // 同步写（Windows 管道句柄）可能写到一半才失败：start-turn 帧只要可能出去过一个字节，
+        // 写入同步抛错时帧可能已经出去了一部分：start-turn 帧只要可能出去过一个字节，
         // 结果就是未知，不是「没发」。
-        reject(method === "thread-follower-start-turn"
+        reject(method === "thread-follower-start-turn" && pending.written
           ? new CodexDesktopIpcUnknownOutcomeError(`ChatGPT IPC start-turn write failed: ${String(error)}`)
           : error);
       }

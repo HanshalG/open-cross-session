@@ -104,7 +104,8 @@
    全权，Everyone 只读），别的非管理员账号加不了实例也写不进去，但同一用户的进程可以在
    真服务端旁边再加实例——`FILE_FLAG_FIRST_PIPE_INSTANCE` 只保护创建那一刻。所以「探测
    过关再用 net.connect 另连一次」不成立；Bun/Node 的 net.Socket 又不给句柄，于是 Windows
-   上整条传输都跑在校验过的句柄上（`PeekNamedPipe` 轮询，2ms 起、空闲退到 50ms）。句柄用
+   上整条传输都跑在校验过的句柄上（`PeekNamedPipe` 轮询，2ms 起、空闲退到 50ms；句柄设成
+   `PIPE_NOWAIT`，写不进去的字节排队，服务端不读也不会把事件循环卡死在 `WriteFile` 里）。句柄用
    `SECURITY_IDENTIFICATION` 打开（流氓服务端不能冒充我们），只接受 `\\.\pipe\…`
    （`\\host\pipe\…` 会把凭据送上 SMB）。`OCS_CODEX_IPC_PIPE` 只换名字不换规则。
    `codexDesktopIpcAvailable` 是一次「开、查、关」的探测，不发帧；不缓存任何服务端身份。
