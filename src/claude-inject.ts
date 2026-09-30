@@ -5,7 +5,8 @@
 // 相对上游的改动：env 覆盖变量改名为 OCS_*；新增 listNativeSessions() 导出；
 // NativeClaudeSession 多读一个 statusUpdatedAt（notify-when-idle 算「忙了多久」用）；
 // writeFramesToSocket 成功路径也 destroy()（对端迟迟不关连接时进程不再被撑着，见函数注释；
-// 建议回流上游）。
+// 建议回流上游）；injectChannelMessage 多收一个 msgId 透传给 buildInjectFrames（回执订阅方要
+// 自己定 msg_id，见 src/claude-receipt.ts；待回流上游）。
 //
 // 定位：本模块是「最后一公里」——
 // 把频道 @ 消息以 Claude Code 原生「Message from X」内联 UX 注入到本机已入册、当前 idle
@@ -496,6 +497,11 @@ export interface InjectChannelMessageInput {
   fromSock?: string;
   fromMode?: "prompting" | "bypass";
   priority?: "now" | "next" | "later";
+  /**
+   * 帧的 msg_id。回执（peer_message_status）用 orig_msg_id 指回它，所以要订阅回执的调用方
+   * 必须自己定这个值；省略时照旧随机生成。（ocs 新增，待回流上游）
+   */
+  msgId?: string;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -550,6 +556,7 @@ export async function injectChannelMessage(
     fromSock: input.fromSock,
     peerToken,
     priority: input.priority,
+    ...(input.msgId !== undefined ? { msgId: input.msgId } : {}),
   });
   for (const line of lines) {
     if (Buffer.byteLength(line, "utf8") + 1 > CLAUDE_INBOX_MAX_LINE_BYTES) {

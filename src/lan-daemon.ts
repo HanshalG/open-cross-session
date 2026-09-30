@@ -233,6 +233,9 @@ export async function handleLanDm(
     wakeInput: { channel, seq: message.seq, from: remoteAddress, body, lang: localLang },
     dmReplyTarget: remoteAddress,
     anyReplyTarget: remoteAddress,
+    // 同一条带回执的唤醒；发送方在另一台机器上，第一阶段结果随应答回传，终态只记在本机
+    // 频道日志里（不做跨机回传：那要本机主动连回对端并再发一条请求，见 docs/lan.md）。
+    receipts: { sender: null, followUp: false },
     env,
   }, messages(replyLang), sink);
   return {

@@ -85,6 +85,12 @@ ocs dm <address>@<peer> "<text>" # message + wake an agent on a paired machine
   log commit succeeded. Requested wakes report accepted, stored-only, or unknown
   separately. Exit 2 means stored but wake failed; exit 3 means stored with an
   unknown outcome. Never resend either result; inspect the printed channel/seq.
+- Claude receivers report back (macOS/Linux): `wake: accepted by inbox` means no
+  hold/refuse receipt arrived — not that it was read. `wake: HELD` (exit 2) means
+  the receiver's crossSessionInbound gate parked it for manual approval; it is dropped
+  after 5 minutes. Do not resend: ocs sends this session one `[ocs delivery notice]`
+  if it ends up not delivered, and `ocs read` shows `[wake → name: status]` under
+  your own messages. The fix is on the receiving side (`ocs doctor --fix`).
   A send that wakes nobody (no @mention, no --reply-to) says stored-only; in a
   dm-* channel that exits 2 too. A DM does not auto-wake the peer on plain send.
 - Codex delivery ladder depends on the host: a Desktop-hosted task goes through

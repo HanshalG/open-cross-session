@@ -94,6 +94,8 @@ function fixture(options: { withSelf?: boolean; selfCwd?: string; peerCwd?: stri
       [OCS_HOME_ENV]: home,
       [CLAUDE_NATIVE_SESSIONS_DIR_ENV]: sessionsDir,
       [IDLE_POLL_MS_ENV]: "20",
+      // 慢机器上回执 helper 冷启动可能过秒；默认上限由 test/receipt.test.ts 单独钉。
+      OCS_RECEIPT_CLI_WAIT_MS: "20000",
       OCS_LANG: "en",
     },
     home,
@@ -311,7 +313,7 @@ describe("#36：没叫醒任何人要明说；全角标点后的 @ 照样唤醒"
     try {
       const r = await run(f, ["send", "chat", "麻烦看一下。@worker-a", "--as", "tester"]);
       expect(r.code).toBe(0);
-      expect(r.stdout).toContain("wake: delivered to inbox → worker-a");
+      expect(r.stdout).toContain("wake: accepted by inbox → worker-a");
       await f.nextFrame();
     } finally {
       f.close();
@@ -351,7 +353,7 @@ describe("唤醒目标排除发送者本人（#3）", () => {
     const f = fixture();
     try {
       const r = await run(f, ["send", "chat", "please look @worker-a", "--as", "tester"]);
-      expect(r.stdout).toContain("wake: delivered to inbox → worker-a");
+      expect(r.stdout).toContain("wake: accepted by inbox → worker-a");
       const c = content(await f.nextFrame());
       expect(c).toContain("[ocs wake] tester mentioned you in #chat (seq 1)\n\nplease look @worker-a\n\n");
       expect(c).toContain('Reply: ocs send chat "<your reply>" --reply-to 1\n');
@@ -368,7 +370,7 @@ describe("--reply-to 唤醒被回复者（Reply: 行复制即达）", () => {
     try {
       expect((await run(f, ["send", "chat", "question", "--as", "worker-a", "--no-wake"])).code).toBe(0);
       const r = await run(f, ["send", "chat", "<your reply>", "--as", "tester", "--reply-to", "1"]);
-      expect(r.stdout).toContain("wake: delivered to inbox → worker-a");
+      expect(r.stdout).toContain("wake: accepted by inbox → worker-a");
       const c = content(await f.nextFrame());
       expect(c).toContain("[ocs wake] tester mentioned you in #chat (seq 2, reply to seq 1)\n\n<your reply>\n\n");
       expect(c).toContain('Reply: ocs send chat "<your reply>" --reply-to 2\n');
@@ -482,7 +484,7 @@ describe("dm 唤醒提示（#8 #9）", () => {
       expect({ code: degraded.code, stderr: degraded.stderr }).toEqual({ code: 0, stderr: "" });
       expect(degraded.stdout).toContain("workspace continuity disabled:");
       expect(degraded.stdout).toContain("session-scoped DM remains available");
-      expect(degraded.stdout).toContain("wake: delivered to inbox");
+      expect(degraded.stdout).toContain("wake: accepted by inbox");
       await f.nextFrame();
     } finally {
       f.close();
@@ -535,7 +537,7 @@ describe("notify-when-idle（#5）端到端：真脱离终端的 watcher", () =>
       const r = await run(f, ["send", "chat", "do it @worker-a", "--as", "tester", "--notify-when-idle"]);
       expect(r.code).toBe(0);
       expect(r.stdout).toContain("stored #chat seq 1");
-      expect(r.stdout).toContain("wake: delivered to inbox → worker-a");
+      expect(r.stdout).toContain("wake: accepted by inbox → worker-a");
       expect(r.stdout).toContain("notify-when-idle: subscribed → worker-a");
       expect(r.stdout).toContain("already idle");
       const first = content(await f.nextFrame());

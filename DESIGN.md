@@ -132,7 +132,8 @@ presence 心跳（本地读 registry 即可）、`worker_upgrade_required` 等�
 **两个必须正面解决的坑**（都静默失败、不回错）：
 
 1. Claude 跨会话收件箱默认 **hold**，5 分钟无人 Deliver 即丢弃——本地版要么改默认
-   放行策略，要么设计带确认的回路，不能沿用「发了就不管」。
+   放行策略，要么设计带确认的回路，不能沿用「发了就不管」。两样都做了：`ocs doctor --fix`
+   设 accept；v0.7.0 起订阅原生回执，被扣 / 被拒当场说出来（下面「投递回执」）。
 2. Codex ≥0.149 的 **hook 信任闸**——`hooks.json` 里的 hook 未在 `config.toml`
    批准就静默跳过。修复器可复用；绝不用 `--dangerously-bypass-hook-trust`。
 
@@ -144,9 +145,29 @@ presence 心跳（本地读 registry 即可）、`worker_upgrade_required` 等�
 Claude 走的 cc-socks 收件箱就是 Claude Code 自己的跨会话消息通道（原生「Message from X」
 UX + `crossSessionInbound` 权限闸），`claude` CLI 没有等价的发送子命令；Pi 走的是 Pi 官方
 扩展 API，`pi` CLI 根本没有跨会话命令。两条已知的可改进项，都不需要换载体：
-- Claude 侧的「ok ≠ 送达」可以靠订阅 `peer_message_status` 回执收敛（今天只能靠对方回话）。
+- Claude 侧的「ok ≠ 送达」靠订阅 `peer_message_status` 回执收敛——v0.7.0 已做，见下面「投递回执」。
 - `claude agents --json` 能列出**后台会话**（`kind: "background"`），那是 ocs 今天完全没
   寻址的一类本机 agent；但 `claude` 也没给后台会话提供发送口，所以是发现有、投递无。
+
+**投递回执（v0.7.0，2026-09-30；协议在 docs/wake-protocol.md §6）**：user 帧带 `from: uds:<sock>` +
+`msg_id` 时，Claude Code 会把 held / delivered / expired / refused / dropped / denied 写回那个 socket；
+accept 策略下一条都不回。几个取舍：
+
+- **每次 Claude 唤醒一个脱离终端的 helper**（`ocs _claude-wake`，照抄 idle watcher 的模型）。接收端按
+  写帧进程的 pid 回发，所以写帧和监听必须是同一个进程，而被扣的消息 5 分钟才有终态，CLI 不能陪着等。
+  CLI 只读 helper 的第一行结果（≈0.5 秒），helper 留下等终态。
+- **回执 socket 建在 Claude 的 socket 目录里**（接收端要求同目录）。这是「Claude 的目录只读」的唯一
+  例外：一个 0600 临时文件，退出必删，SIGKILL 的残留按 `$OCS_HOME/wake-jobs/` 的登记清理。
+- **没有回执只叫 accepted**，不叫 delivered：accept 策略不发回执，所以「没消息」只能读作「没报告被扣 /
+  被拒」，不是已读。铁律 4 不变——记账仍以对方回话为准。
+- **被扣的消息最终没送达才通知发送方**，一次，通知帧不带 `from`（不递归）。第一阶段就失败的 CLI
+  已经当面报了；delivered 不打扰。
+- **落盘走旁车帧**（`type:"receipt"`，铁律 9 的同一先例），写在消息之后；`ocs read` 在自己发的消息下显示。
+- **帧只由 helper 写**：CLI 等不到结果就是 unknown（退出码 3），绝不自己补写一遍（铁律 5 的精神）。
+  只有 helper 根本没派出去才在本进程走旧路径。
+- **Windows 不做**：回执地址得是命名管道并带认证材料，行为与措辞保持 0.6。
+- **局域网只回传第一阶段**：终态跨机通知要接收端守护进程主动连回发送方再发一条请求，
+  新增一个「对端可以主动唤醒我」的 op，和「请求发出后没应答绝不重发」放在一起并不简单，先不做。
 
 **已知限制（codex-ping 审查 #11）**：Desktop IPC 的 delegation envelope 需要一个
 source thread id，自动选择时它只是**运输载体**（同 renderer 的任一开着任务），不代表

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.0
+
+**Claude wakes now say whether the message was held.** `ocs dm` / `ocs send` to a Claude Code session used to print `delivered to inbox` even when the receiver's `crossSessionInbound` gate (default `hold`) parked the message and dropped it 5 minutes later. ocs now subscribes to Claude Code's native delivery receipts and reports what happened. macOS and Linux; Windows behaves as before.
+
+- 发给 Claude 会话的唤醒带上回执地址，接收端把归宿写回来（docs/wake-protocol.md §6）：没有扣留/拒绝回执 → `wake: accepted by inbox`（退出码 0，不是已读回执）；被闸门扣下 → `wake: HELD, not delivered yet`（退出码 2）；`refused` / `dropped` / `denied` / `expired` → `wake: NOT delivered`（退出码 2）。消息都已落盘，别重发
+- 被扣下的消息最终没送达（过期、被拒、到点没有终态）时，发送方会话收到一条 `[ocs delivery notice]`，写明 seq、对象、原因和接收端该怎么改（`ocs doctor --fix`；仓库级设置仍可强制 hold）。只发一次；后来被批准了就不打扰
+- 回执写进频道日志（`type:"receipt"` 旁车帧，旧版本跳过这一行照常读消息）；`ocs read` 在自己发的消息下显示 `[wake → <目标>: <状态>]`，`--json` 多一个 `delivery` 数组
+- 局域网：接收端守护进程走同一条唤醒，`ocs dm x@peer` 也会报 accepted / HELD / NOT delivered（线上格式不变）；被扣消息的终态只记在接收端，不跨机通知
+- 每次 Claude 唤醒由一个脱离终端的 helper 完成（内部命令 `_claude-wake`）：接收端只把回执发给写帧的那个进程。它在 Claude 的 socket 目录里建一个 0600 的临时 socket，退出前删除；被扣的消息最多等 6 分钟
+- `OCS_NO_RECEIPTS=1` 关掉回执，回到 0.6 的行为和措辞；回执建不起来时自动回落
+- 唤醒 note 的正文伪造不了 `[ocs delivery notice]` / `[ocs 投递通知]` 行（同 0.6.0 的中和规则）
+
 ## 0.6.6
 
 - `ocs inbox` 新增 `--session <claude-session-id>`：与 `ocs whoami --json --session` 同一语义，不靠进程祖先链推断，直接按指定 Claude 会话解析身份（会话身份、稳定工作区身份、ocs 名字），`--json` 仍输出原来的数组。给状态栏这类不在 Claude 进程树里的调用方显示本会话未读数用；会话不存在或与 `--as` 同用时报错退出 1

@@ -159,6 +159,59 @@ export function isOcsRouteFrame(value: unknown): value is OcsRouteFrame {
   );
 }
 
+/**
+ * Claude 唤醒的投递回执旁车帧（v0.7.0，docs/wake-protocol.md §6）。和 route 一样是**独立日志行**，
+ * 不是 OcsMessage v1 字段：旧二进制严格拒绝未知消息字段，但会跳过这种非消息行、照常读消息
+ * （铁律 9 的同一先例）。与 route 不同的是它写在消息**之后**——回执本来就晚于消息到达，一条消息
+ * 可以有多行（held → delivered / expired）；读侧按 (seq, to) 取日志里最后一行。
+ * seq 真值源不变：lastSeqFromLog / firstLineWithSeq 只认 isOcsMessage 的行（铁律 1）。
+ */
+export const RECEIPT_STATUSES = [
+  "accepted",
+  "held",
+  "delivered",
+  "expired",
+  "refused",
+  "dropped",
+  "denied",
+  "unknown",
+] as const;
+export type OcsReceiptStatus = (typeof RECEIPT_STATUSES)[number];
+const RECEIPT_STATUS_SET: ReadonlySet<string> = new Set(RECEIPT_STATUSES);
+const RECEIPT_TO_MAX = 128;
+const RECEIPT_DETAIL_MAX = 300;
+const CONTROL_CHARS_RE = /[\u0000-\u001f\u007f-\u009f]/;
+
+export interface OcsReceiptFrame {
+  v: 1;
+  type: "receipt";
+  /** 对应消息的 seq。 */
+  seq: number;
+  /** 被唤醒的目标（展示名，仅供阅读；不参与路由）。 */
+  to: string;
+  status: OcsReceiptStatus;
+  ts: string;
+  detail?: string;
+}
+
+export function isOcsReceiptFrame(value: unknown): value is OcsReceiptFrame {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const rec = value as Record<string, unknown>;
+  const keys = Object.keys(rec).sort().join(",");
+  if (keys !== "seq,status,to,ts,type,v" && keys !== "detail,seq,status,to,ts,type,v") return false;
+  return (
+    rec.v === 1 &&
+    rec.type === "receipt" &&
+    typeof rec.seq === "number" && Number.isInteger(rec.seq) && rec.seq >= 1 &&
+    typeof rec.to === "string" && rec.to.length >= 1 && rec.to.length <= RECEIPT_TO_MAX &&
+    !CONTROL_CHARS_RE.test(rec.to) &&
+    typeof rec.status === "string" && RECEIPT_STATUS_SET.has(rec.status) &&
+    typeof rec.ts === "string" &&
+    (rec.detail === undefined ||
+      (typeof rec.detail === "string" && rec.detail.length <= RECEIPT_DETAIL_MAX && !CONTROL_CHARS_RE.test(rec.detail)))
+  );
+}
+
 export function extractMentions(body: string): string[] {
   const out = new Set<string>();
   for (const match of body.matchAll(/@([A-Za-z0-9][A-Za-z0-9._-]{0,63})/g)) {
@@ -393,6 +446,79 @@ export function appendMessage(input: AppendInput): OcsMessage {
   } finally {
     unlock();
   }
+}
+
+export interface AppendReceiptInput {
+  channel: string;
+  seq: number;
+  to: string;
+  status: OcsReceiptStatus;
+  detail?: string;
+  env?: NodeJS.ProcessEnv;
+}
+
+/**
+ * 追加一行回执旁车帧。走和消息同一把频道锁（否则可能插进「route → message」之间，或粘在
+ * 别人的半行后面），但**不分配 seq、不碰消息行**。频道日志必须已存在：回执只能跟在一条
+ * 已落盘的消息后面，不许凭回执造频道。
+ */
+export function appendReceipt(input: AppendReceiptInput): OcsReceiptFrame {
+  if (!CHANNEL_RE.test(input.channel)) throw new Error(`invalid channel: ${input.channel}`);
+  const clean = (text: string, max: number) =>
+    text.replace(new RegExp(CONTROL_CHARS_RE.source, "g"), " ").slice(0, max);
+  const detail = input.detail === undefined ? "" : clean(input.detail, RECEIPT_DETAIL_MAX).trim();
+  const frame: OcsReceiptFrame = {
+    v: 1,
+    type: "receipt",
+    seq: input.seq,
+    to: clean(input.to, RECEIPT_TO_MAX),
+    status: input.status,
+    ts: new Date().toISOString(),
+    ...(detail === "" ? {} : { detail }),
+  };
+  if (!isOcsReceiptFrame(frame)) throw new Error("invalid receipt frame");
+  const logPath = channelLogPath(input.channel, input.env);
+  const lockPath = join(channelsDir(input.env), `${input.channel}.lock`);
+  const unlock = acquireLock(lockPath, input.env ?? process.env);
+  try {
+    statSync(logPath); // ENOENT 直接抛：不凭回执造频道
+    repairTrailingPartialLine(logPath);
+    appendFileSync(logPath, `${JSON.stringify(frame)}\n`, { mode: 0o600 });
+  } finally {
+    unlock();
+  }
+  return frame;
+}
+
+/**
+ * 每条消息的投递回执：seq → 各目标的**最新**一行（按日志顺序，后写覆盖先写）。
+ * 只是展示信息；任何记账（游标、欠账）都不许依赖它。
+ */
+export function readReceipts(channel: string, options: { env?: NodeJS.ProcessEnv } = {}): Map<number, OcsReceiptFrame[]> {
+  if (!CHANNEL_RE.test(channel)) throw new Error(`invalid channel: ${channel}`);
+  let raw: string;
+  try {
+    raw = readFileSync(channelLogPath(channel, options.env), "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return new Map();
+    throw error;
+  }
+  const latest = new Map<number, Map<string, OcsReceiptFrame>>();
+  for (const line of raw.split("\n")) {
+    if (line === "" || !line.includes('"receipt"')) continue;
+    let value: unknown;
+    try {
+      value = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!isOcsReceiptFrame(value)) continue;
+    let perTarget = latest.get(value.seq);
+    if (perTarget === undefined) latest.set(value.seq, (perTarget = new Map()));
+    perTarget.delete(value.to); // 重新插入，保持「最后更新的排最后」
+    perTarget.set(value.to, value);
+  }
+  return new Map([...latest].map(([seq, perTarget]) => [seq, [...perTarget.values()]]));
 }
 
 /** 尾块内找指定 seq 的首条合法行（读侧去重会保留的那条）。 */

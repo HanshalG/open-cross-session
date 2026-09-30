@@ -23,6 +23,7 @@ import {
 import {
   deliverDm,
   deliverToCodexTask,
+  reportTrackedWake,
   type DeliverySink,
   type StoredDeliveryFailure,
 } from "./deliver.ts";
@@ -62,6 +63,7 @@ import {
   lastSeq,
   ocsHome,
   readMessages,
+  readReceipts,
   readRoutedMessages,
   NAME_RE,
   OCS_IDENTITY_RE,
@@ -99,8 +101,9 @@ import {
   selectWakeTargets,
   splitWakeMentions,
   wakeNote,
-  wakeSessions,
 } from "./wake.ts";
+import { runWakeHelper } from "./wake-helper.ts";
+import { setWakeHelperCommand, WAKE_HELPER_COMMAND, wakeClaudeTracked, type NoticeSender } from "./wake-receipt.ts";
 import {
   checkUpgrade,
   OCS_INSTALL_PS1_URL,
@@ -115,7 +118,7 @@ import {
   upgradeCheckEnabled,
 } from "./upgrade.ts";
 
-export const OCS_VERSION = "0.6.6";
+export const OCS_VERSION = "0.7.0";
 
 const LANG = detectLang();
 const M = messages(LANG);
@@ -149,6 +152,8 @@ const COMMAND_SPECS: Record<string, CommandSpec> = {
   "notify-when-idle": { value: [], bool: [], minPos: 1, maxPos: 1 },
   /** 内部：脱离终端的 idle watcher 入口（不进 help）。 */
   [IDLE_WATCH_COMMAND]: { value: [], bool: [], minPos: 1, maxPos: 1 },
+  /** 内部：脱离终端的 Claude 唤醒 + 回执 helper 入口（不进 help）。 */
+  [WAKE_HELPER_COMMAND]: { value: [], bool: [], minPos: 1, maxPos: 1 },
   who: { value: [], bool: ["json", "verbose", "lan"], minPos: 0, maxPos: 0 },
   lan: {
     value: ["port", "bind", "name", "addr", "label"],
@@ -295,6 +300,24 @@ export function foldSelfMessage(m: { seq: number; body: string }): string {
   const chars = [...m.body.replace(/\s+/g, " ")];
   const head = chars.slice(0, 60).join("");
   return `#${m.seq} <you> ${head}${chars.length > 60 ? "…" : ""}`;
+}
+
+/**
+ * 投递回执通知的收件人：运行这条命令的宿主会话（与 `--as` 写的名字无关——要被告知
+ * 「没送达」的是敲命令的那个 agent）。不在任何会话里返回 null：照常记旁车帧，只是没人可通知。
+ */
+function noticeSender(): NoticeSender | null {
+  const owner = selfNameOwner();
+  if (owner === null) return null;
+  if (owner.kind === "claude") {
+    return {
+      kind: "claude",
+      pid: owner.session.pid,
+      sessionId: owner.session.sessionId,
+      name: owner.session.name ?? `pid-${owner.session.pid}`,
+    };
+  }
+  return owner.kind === "codex" ? { kind: "codex", threadId: owner.id } : { kind: "pi", sessionId: owner.id };
 }
 
 /** --notify-when-idle 的订阅方：必须在 Claude 会话里（否则没有会话可收通知）。 */
@@ -458,16 +481,17 @@ async function cmdSend(parsed: Parsed): Promise<void> {
     if (idleSubscriber !== null) subscribeIdle(idleSubscriber, []);
     return;
   }
-  for (const outcome of await wakeSessions(selection.targets, wakeInput)) {
-    const target = `${outcome.session.name ?? "?"}(pid ${outcome.session.pid})`;
-    if (outcome.result.ok) {
-      // 上游铁律：ok 只代表帧进了收件箱，不代表已进对话（默认 hold）。措辞如实。
-      console.log(M.wakeDelivered(target));
-    } else {
-      console.log(M.wakeFailed(target, outcome.result.reason));
-      markStoredDeliveryFailure("failed");
-    }
-  }
+  // 每个目标一个 helper（写帧的进程必须就是收回执的进程），并发派出、按目标顺序报告。
+  // 铁律 4：帧进了收件箱 ≠ 进了对话；回执能把「被扣 / 被拒」说出来，说不出「已读」。
+  const sender = noticeSender();
+  const wakes = await Promise.all(
+    selection.targets.map((session) => wakeClaudeTracked(session, wakeInput, { sender })),
+  );
+  selection.targets.forEach((session, index) => {
+    reportTrackedWake(`${session.name ?? "?"}(pid ${session.pid})`, wakes[index]!, M, CLI_SINK, {
+      followUp: sender !== null,
+    });
+  });
   if (idleSubscriber !== null) subscribeIdle(idleSubscriber, selection.targets);
 }
 
@@ -643,6 +667,7 @@ async function cmdDm(parsed: Parsed): Promise<void> {
   console.log(M.dmSent(target, channel, message.seq));
   const wakeInput = { channel, seq: message.seq, from, body: message.body, lang: LANG };
 
+  const dmNoticeSender = noticeSender();
   const woken = await deliverDm({
     resolved,
     target,
@@ -651,6 +676,7 @@ async function cmdDm(parsed: Parsed): Promise<void> {
     stableChannel: stableChannel !== undefined,
     wakeInput,
     dmReplyTarget: replyTarget,
+    receipts: { sender: dmNoticeSender, followUp: dmNoticeSender !== null },
   }, M, CLI_SINK);
   if (idleSubscriber !== null) subscribeIdle(idleSubscriber, woken === null ? [] : [woken]);
 }
@@ -919,15 +945,33 @@ function cmdRead(parsed: Parsed): void {
   if (!Number.isInteger(since) || since < 0) fail(M.failSince);
   const found = all.filter((message) => message.seq > since);
   const includeSelf = parsed.flags.has("include-self");
+  // 投递回执只挂在自己发的消息上：那是「我发的这条到底进没进对方对话」的答案。
+  const receipts = readReceipts(channel);
+  const deliveryOf = (m: { seq: number }) =>
+    (receipts.get(m.seq) ?? []).map(({ to, status, ts, detail }) => ({
+      to,
+      status,
+      ts,
+      ...(detail === undefined ? {} : { detail }),
+    }));
   if (parsed.flags.has("json")) {
     // --json 不折叠，但每条带 self 供调用方自行过滤。
-    console.log(JSON.stringify(found.map((m) => ({ ...m, self: isInboxSelf(m, context) })), null, 2));
+    console.log(JSON.stringify(found.map((m) => {
+      const self = isInboxSelf(m, context);
+      const delivery = self ? deliveryOf(m) : [];
+      return { ...m, self, ...(delivery.length === 0 ? {} : { delivery }) };
+    }), null, 2));
   } else if (found.length === 0) {
     console.log(M.noNewMessages(channel, since));
   } else {
     for (const m of found) {
-      if (!includeSelf && isInboxSelf(m, context)) console.log(foldSelfMessage(m));
+      const self = isInboxSelf(m, context);
+      if (!includeSelf && self) console.log(foldSelfMessage(m));
       else printMessage(m);
+      if (self) {
+        const delivery = deliveryOf(m);
+        if (delivery.length > 0) console.log(`  ${delivery.map((d) => M.readDelivery(d.to, d.status)).join(" ")}`);
+      }
     }
   }
   if (!parsed.flags.has("peek") && found.length > 0) {
@@ -1261,6 +1305,12 @@ ocs dm <address>@<peer> "<text>" # message + wake an agent on a paired machine
   log commit succeeded. Requested wakes report accepted, stored-only, or unknown
   separately. Exit 2 means stored but wake failed; exit 3 means stored with an
   unknown outcome. Never resend either result; inspect the printed channel/seq.
+- Claude receivers report back (macOS/Linux): \`wake: accepted by inbox\` means no
+  hold/refuse receipt arrived — not that it was read. \`wake: HELD\` (exit 2) means
+  the receiver's crossSessionInbound gate parked it for manual approval; it is dropped
+  after 5 minutes. Do not resend: ocs sends this session one \`[ocs delivery notice]\`
+  if it ends up not delivered, and \`ocs read\` shows \`[wake → name: status]\` under
+  your own messages. The fix is on the receiving side (\`ocs doctor --fix\`).
   A send that wakes nobody (no @mention, no --reply-to) says stored-only; in a
   dm-* channel that exits 2 too. A DM does not auto-wake the peer on plain send.
 - Codex delivery ladder depends on the host: a Desktop-hosted task goes through
@@ -1398,6 +1448,8 @@ async function main(): Promise<void> {
     fail(`${M.unknownCommand(command)}\n\n${M.help}`);
   }
   const parsed = parseArgs(rest, spec ?? NO_ARGS);
+  // 回执 helper 是本 CLI 的内部子命令：只有从这里进来的进程才知道怎么把自己再跑一遍。
+  setWakeHelperCommand(selfCommand());
   maybeUpdateNotice(OCS_VERSION, command, selfCommand());
   switch (command) {
     case "send":
@@ -1438,6 +1490,9 @@ async function main(): Promise<void> {
       break;
     case IDLE_WATCH_COMMAND:
       await runIdleWatch(parsed.positional[0]!);
+      break;
+    case WAKE_HELPER_COMMAND:
+      await runWakeHelper(parsed.positional[0]!);
       break;
     case "sessions":
       cmdSessions();

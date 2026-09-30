@@ -92,7 +92,11 @@ S → C  应答 {ok, …}                                             AEAD s2c #
 
 `from` 是对方回复用的地址（ocs 名字优先，否则短 id），`from_key` 是不随改名变的短 id。
 `outcome` 是远端唤醒阶梯的总体结果（`ok` / `failed` / `unknown`），映射到发送方退出码 0 / 2 / 3，
-语义同本机 DM：落盘了就别重发。请求发出后没收到应答同样按 `unknown`（退出码 3）处理，
+语义同本机 DM：落盘了就别重发。目标是 Claude 会话时守护进程走带回执的唤醒（wake-protocol §6）：
+第一阶段结果在 `lines` 里（`accepted` / `HELD` / `NOT delivered: refused` …），被扣或被拒归入
+`outcome: "failed"`——线上格式没变，0.6 的发送方照样读得懂。被扣消息的终态（批准 / 过期）只记在
+**接收端**的频道日志里，不回传、不通知发送方：那需要接收端主动连回发送方再发一条请求，等于新增一个
+「对端可以主动唤醒我」的 op，和「请求发出后没应答绝不重发」的规则叠在一起并不简单，没有做。请求发出后没收到应答同样按 `unknown`（退出码 3）处理，
 **绝不自动重发**（铁律 5）。
 
 ### 频道与身份
@@ -147,8 +151,9 @@ UDP 组播 `239.255.67.83:47891`（不用 mDNS，不和系统 mDNSResponder / av
 - 文件权限靠 NTFS ACL（用户目录默认私有），不检查 mode 位。
 - 防火墙：给 `ocs.exe` 放行入站 TCP 47890、UDP 47891。家里 Wi-Fi 常被识别成「公用」网络，
   这时规则要带上 Public，并用 `-RemoteAddress <本网段>` 收窄范围，不要整体改网络类型。
-- `crossSessionInbound` 默认 hold：远端消息进收件箱后 5 分钟没人点投递就被丢弃，发送方看到的仍是
-  「已投递收件箱」。要让 agent 之间自动往来，设 `"crossSessionInbound": "accept"`（`ocs doctor --fix`）；
+- `crossSessionInbound` 默认 hold：远端消息进收件箱后 5 分钟没人点投递就被丢弃。Windows 上没有投递回执
+  （回执地址得是命名管道并带认证材料），发送方看到的仍是「已投递收件箱」；macOS / Linux 接收端会如实报
+  「被扣留」。要让 agent 之间自动往来，设 `"crossSessionInbound": "accept"`（`ocs doctor --fix`）；
   代价是已配对机器发来的消息不经人确认就进入 agent。
 
 ## macOS 防火墙

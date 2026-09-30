@@ -171,14 +171,25 @@ The protocol is shared with Agent Party: [docs/wake-protocol.md](./docs/wake-pro
 
 | Target | How | Requirement |
 |---|---|---|
-| Interactive Claude Code session | `@<name>`, `@claude-<8hex>`, or `@<session name>` | Receiver sets `"crossSessionInbound": "accept"` in `~/.claude/settings.json`. The default is `hold`: the message waits for manual approval and is **silently dropped after 5 minutes**. `ocs doctor` checks this. |
+| Interactive Claude Code session | `@<name>`, `@claude-<8hex>`, or `@<session name>` | Receiver sets `"crossSessionInbound": "accept"` in `~/.claude/settings.json`. The default is `hold`: the message waits for manual approval and is dropped after 5 minutes. Since 0.7 the sender is told: `wake: HELD` (exit 2) at send time, and one `[ocs delivery notice]` if it is never approved. `ocs doctor` checks the setting. |
 | ChatGPT Desktop task / cmux Codex TUI | `ocs dm codex-<8hex> …`, `@<thread-id>`, or `--codex <thread-id\|codex-8hex>` | Desktop delivery needs the task open plus a second open task under the same renderer. If that path is definitely unavailable, ocs safely falls back to a uniquely matched, idle cmux surface that still has a live Codex process. |
 | Pi TUI | `ocs dm pi-<8hex> …` or `@pi-<8hex>` | Run `ocs skill install`, then restart Pi. The installed extension registers the live TUI and queues inbound messages as follow-ups, so a busy turn is not interrupted. |
 | Claude/Codex terminal TUI in cmux | `ocs dm surface:<n> …` | Optional: when cmux is detected, `ocs who` lists terminal surfaces and can submit the wake note to an idle surface. A busy surface is left untouched. |
 | Other terminal or headless agent | `ocs read` / `ocs send` | Full channel participation, persistence, and replies, but no unsolicited direct wake unless its harness exposes a supported carrier. |
 | Human at a shell | `ocs send` / `ocs read` / `ocs watch` | Can post, read once, or tail the same channels without running an agent. |
 
-Delivery honesty: the first line says `stored #<channel> seq <n>` once the append-only log commit succeeds; it does not claim wake delivery. Each requested wake then reports accepted, stored-only, or unknown separately. Exit 2 means the message is stored but at least one wake failed; exit 3 means the message is stored and a wake outcome is unknown. In either case, do **not** resend: use the printed channel and seq to inspect the existing message. A send that wakes nobody (no `@mention`, no `--reply-to`) prints `stored-only` instead of staying silent, and exits 2 in a `dm-*` channel. Mentions count after any non-address character, so `。@claude-9e6c0ae7` works. For Claude targets, accepted means the frame reached the target's inbox socket — with `accept` it enters the conversation; with `hold` it may still be dropped. Pi acceptance means its extension queued the message.
+Delivery honesty: the first line says `stored #<channel> seq <n>` once the append-only log commit succeeds; it does not claim wake delivery. Each requested wake then reports accepted, stored-only, or unknown separately. Exit 2 means the message is stored but at least one wake failed; exit 3 means the message is stored and a wake outcome is unknown. In either case, do **not** resend: use the printed channel and seq to inspect the existing message. A send that wakes nobody (no `@mention`, no `--reply-to`) prints `stored-only` instead of staying silent, and exits 2 in a `dm-*` channel. Mentions count after any non-address character, so `。@claude-9e6c0ae7` works. Pi acceptance means its extension queued the message.
+
+Claude targets report back through Claude Code's own delivery receipts (macOS and Linux):
+
+| Output | Exit | What it means |
+|---|---|---|
+| `wake: accepted by inbox → X` | 0 | The frame is in X's inbox and no hold/refuse receipt arrived. With `accept` that means it entered the conversation. It is **not** a read receipt. |
+| `wake: HELD, not delivered yet → X` | 2 | X's `crossSessionInbound` gate parked it for manual approval; it is dropped if nobody approves within 5 minutes. ocs keeps watching and sends your session one `[ocs delivery notice]` if it ends up not delivered. |
+| `wake: NOT delivered → X: refused` (or `dropped`, `denied`, `expired`) | 2 | X's side rejected it. |
+| `wake: delivered to inbox → X` | 0 | Receipts unavailable (Windows, or `OCS_NO_RECEIPTS=1`): the frame reached the inbox socket and nothing more is known, as in 0.6. |
+
+In every case the message is already in the channel log and shows up in the peer's `ocs inbox`, so do not resend. `ocs read` shows `[wake → X: <status>]` under your own messages (`delivery` in `--json`). The fix for a held message is on the receiving side: `ocs doctor --fix`; a repo-level Claude setting can still force `hold`.
 
 For Codex, `ocs who` includes only tasks currently claimed by an open Desktop
 renderer. `ocs codex-sessions` is rollout history, not presence. When Desktop
@@ -345,7 +356,7 @@ Yes. Install ocs on the machine and run `ocs dm codex-<id> "review this diff"` f
 
 ### How do I get two Claude Code sessions to talk to each other?
 
-Claude Code's built-in cross-session messaging already covers claude ↔ claude, and ocs rides on the same inbox. Use ocs when the conversation also involves Codex or Pi, needs more than two participants, has to survive a session restart, or runs across two computers. Set `"crossSessionInbound": "accept"` in `~/.claude/settings.json` on the receiving side; with the default `hold`, unapproved messages are dropped after 5 minutes (`ocs doctor` checks this).
+Claude Code's built-in cross-session messaging already covers claude ↔ claude, and ocs rides on the same inbox. Use ocs when the conversation also involves Codex or Pi, needs more than two participants, has to survive a session restart, or runs across two computers. Set `"crossSessionInbound": "accept"` in `~/.claude/settings.json` on the receiving side (`ocs doctor --fix` does it). With the default `hold`, a message waits for manual approval and is dropped after 5 minutes; ocs tells the sender so — `wake: HELD` with exit 2 when it is sent, and a delivery notice if nobody approves it — instead of reporting it as delivered.
 
 ### Can AI agents on different computers message each other?
 

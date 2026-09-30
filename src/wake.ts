@@ -7,6 +7,8 @@
 // 「去跑 ocs read」的指针，收件方要多跑一跳才拿到正文，回复命令还得手拼。
 // 送达语义同上游：ok:true 只代表帧进了收件箱 socket，接收端 crossSessionInbound
 // 默认 hold（5 分钟无人 Deliver 即丢）。`ocs doctor` 负责引导用户把它设为 accept。
+// v0.7.0 起 CLI 的 Claude 唤醒经 src/wake-receipt.ts 派 helper 订阅原生回执（协议 §6），被扣 / 被拒
+// 能当场说出来；这里的 wakeSessions 仍是不带回执的那条路（回执不可用时的回落、ocs 自己的通知）。
 
 import { Buffer } from "node:buffer";
 import { readFileSync } from "node:fs";
@@ -59,6 +61,11 @@ export interface WakeNoteInput {
   /** 可选的相对时间（"2m ago"）；ocs 的唤醒紧随 send，调用方一般不传。 */
   ago?: string;
   lang?: WakeLang;
+  /**
+   * 已经成形的通知正文（投递回执通知，协议 §6）：给了就原样返回，不套唤醒骨架。
+   * 只给 ocs 自己生成的通知用——它不是对方的消息，没有可回复的 seq。
+   */
+  rawNote?: string;
 }
 
 /** 在 UTF-8 字节边界截断：不切开多字节字符（含代理对——UTF-8 里是一个 4 字节序列）。 */
@@ -70,13 +77,13 @@ export function truncateUtf8(text: string, maxBytes: number): string {
   return buf.subarray(0, end).toString("utf8");
 }
 
-const PROTOCOL_LINE_RE = /^(\s*)(Reply:|Thread:|回复：|线程：|\[ocs wake\]|\[ocs 唤醒\]|\[Cross-session idle notice\]|\[跨会话空闲通知\])/gm;
+const PROTOCOL_LINE_RE = /^(\s*)(Reply:|Thread:|回复：|线程：|\[ocs wake\]|\[ocs 唤醒\]|\[Cross-session idle notice\]|\[跨会话空闲通知\]|\[ocs delivery notice\]|\[ocs 投递通知\])/gm;
 
 /**
  * 正文是对方可控的数据（跨机 DM 之后更是网络另一端可控），不能让它冒充包装与骨架：
  * - `<cross-session-message` / `</cross-session-message` 的 `<` 换成 `‹`，正文闭合不了包装标签，
  *   也开不出一个伪造 from-name 的新标签（Codex queue / Pi / cmux 没有包装，同样适用）；
- * - 行首形似 `Reply:` / `Thread:` / 唤醒首行 / 空闲通知的行前加 `> `，伪造不了回复命令。
+ * - 行首形似 `Reply:` / `Thread:` / 唤醒首行 / 空闲通知 / 投递通知的行前加 `> `，伪造不了回复命令。
  * 其余字节原样保留（协议 §1「逐字」在这两处例外，见 docs/wake-protocol.md）。
  */
 export function neutralizeWakeBody(body: string): string {
@@ -117,6 +124,12 @@ export function wakeReadCommand(channel: string, receiver: string, implicitRecei
  * 骨架超 1024B 时先砍 ago、再砍 sender；Reply:/Thread: 永不砍。
  */
 export function wakeNote(input: WakeNoteInput): string {
+  if (input.rawNote !== undefined) {
+    if (Buffer.byteLength(input.rawNote, "utf8") > WAKE_NOTE_MAX_BYTES) {
+      throw new Error(`notice exceeds ${WAKE_NOTE_MAX_BYTES} bytes`);
+    }
+    return input.rawNote;
+  }
   const M = messages(input.lang ?? "en");
   const dmReply = input.dmReplyTarget !== undefined;
   const implicitReceiver = dmReply || input.implicitReceiver === true;
@@ -331,6 +344,8 @@ export interface WakeInput {
   replyTo?: number;
   dmReplyTarget?: string;
   lang?: WakeLang;
+  /** 见 WakeNoteInput.rawNote。 */
+  rawNote?: string;
   env?: NodeJS.ProcessEnv;
 }
 

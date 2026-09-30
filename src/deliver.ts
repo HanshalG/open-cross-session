@@ -5,17 +5,18 @@
 // sink：CLI 的 sink 打印并设退出码，守护进程的 sink 收集行、算出总体结果回传。
 // 分支和措辞与原来逐字一致——两个入口共用一份，免得一边修了另一边漂。
 
-import type { NativeClaudeSession } from "./claude-inject.ts";
+import { resolveSessionSocketByPid, type NativeClaudeSession } from "./claude-inject.ts";
 import { codexHosts, codexThreadLivePid, psTable, queueCodexThread } from "./codex-queue.ts";
 import type { messages } from "./i18n.ts";
-import { wakePiSession } from "./pi-sessions.ts";
+import { listPiSessions, wakePiSession } from "./pi-sessions.ts";
 import {
   CODEX_THREAD_ID_ENV,
   findCodexCmuxSurface,
   wakeCmuxSurface,
   type ResolvedDmTarget,
 } from "./roster.ts";
-import { wakeCodexTask, wakeNote, wakeSessions, type WakeNoteInput } from "./wake.ts";
+import { wakeCodexTask, wakeNote, wakeSessions, type WakeInput, type WakeNoteInput } from "./wake.ts";
+import { wakeClaudeTracked, type NoticeSender, type TrackedWake } from "./wake-receipt.ts";
 
 export type Catalog = ReturnType<typeof messages>;
 export type StoredDeliveryFailure = "failed" | "unknown";
@@ -169,6 +170,105 @@ export async function deliverToCodexTask(
   return false;
 }
 
+/**
+ * 把一次 Claude 唤醒的第一阶段结果说清楚（docs/wake-protocol.md §6）。
+ * - plain：回执不可用，措辞和 0.6 逐字一致（「delivered to inbox」只代表帧进了收件箱）。
+ * - accepted：回执通道开着，窗口内没报扣留/拒绝——仍然不是已读。
+ * - held / refused / dropped / denied / expired：消息已落盘但没进对话 → 退出码 2。
+ * - unknown：helper 没给结果，帧可能已写出 → 退出码 3，绝不重放。
+ */
+export function reportTrackedWake(
+  label: string,
+  wake: TrackedWake,
+  M: Catalog,
+  sink: DeliverySink,
+  options: { followUp: boolean },
+): void {
+  if (wake.kind === "plain") {
+    sink.log(M.wakeDelivered(label));
+    return;
+  }
+  if (wake.kind === "failed") {
+    sink.log(M.wakeFailed(label, wake.detail === undefined ? wake.reason : `${wake.reason} (${wake.detail})`));
+    sink.fail("failed");
+    return;
+  }
+  if (wake.kind === "unknown") {
+    sink.log(M.wakeHelperUnknown(label, wake.detail));
+    sink.fail("unknown");
+    return;
+  }
+  if (wake.status === "accepted") {
+    sink.log(M.wakeAccepted(label));
+    return;
+  }
+  if (wake.status === "delivered") {
+    sink.log(M.wakeConfirmed(label));
+    return;
+  }
+  if (wake.status === "held") sink.log(M.wakeHeld(label, options.followUp));
+  else sink.log(M.wakeNotDelivered(label, wake.status, wake.reason ?? ""));
+  sink.fail("failed");
+}
+
+/** 会话环境变量：通知发给「派出 helper 的那个会话」自己，不能让自我唤醒防回环把它吞掉。 */
+const SELF_ENV_KEYS = [
+  "CLAUDE_CODE_SESSION_ID",
+  "CLAUDE_CODE_MESSAGING_SOCKET",
+  "CODEX_THREAD_ID",
+  "OCS_NAME",
+  "OCS_PI_SESSION_ID",
+];
+
+/**
+ * 把一条 ocs 自己生成的通知（投递回执通知）按发送方的 harness 投回去。走的是同一套载体，
+ * 但**故意不带回执**：Claude 分支直接 wakeSessions（不派 helper、帧里没有 `from`），
+ * 否则一条被扣下的通知会再生出一条通知，永无止境。
+ */
+export async function deliverNotice(
+  target: NoticeSender,
+  note: string,
+  context: { channel: string; seq: number; lang: "en" | "zh" },
+  M: Catalog,
+  sink: DeliverySink,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  const input: WakeInput = { ...context, from: "ocs", body: note, rawNote: note };
+  if (target.kind === "claude") {
+    const resolved = resolveSessionSocketByPid(target.pid, { expectSessionId: target.sessionId, env });
+    if (!resolved.ok) {
+      sink.log(M.wakeFailed(target.name, "sender session is gone"));
+      sink.fail("failed");
+      return;
+    }
+    const [outcome] = await wakeSessions([resolved.session], { ...input, env });
+    if (outcome!.result.ok) sink.log(M.wakeDelivered(target.name));
+    else {
+      sink.log(M.wakeFailed(target.name, outcome!.result.reason));
+      sink.fail("failed");
+    }
+    return;
+  }
+  const clean: NodeJS.ProcessEnv = { ...env };
+  for (const key of SELF_ENV_KEYS) delete clean[key];
+  if (target.kind === "codex") {
+    await deliverToCodexTask(target.threadId, input, M, sink, undefined, clean);
+    return;
+  }
+  const session = listPiSessions(clean).find((candidate) => candidate.session_id.toLowerCase() === target.sessionId.toLowerCase());
+  if (session === undefined) {
+    sink.log(M.piWakeUnavailable(target.sessionId));
+    sink.fail("failed");
+    return;
+  }
+  const result = await wakePiSession(session, note);
+  if (result.ok) sink.log(M.piWakeAccepted(session.target));
+  else {
+    sink.log(M.piWakeFailed(session.target, result.reason, result.detail ?? ""));
+    sink.fail(result.reason === "unknown-outcome" ? "unknown" : "failed");
+  }
+}
+
 export interface DmDeliveryInput {
   resolved: ResolvedDmTarget;
   /** 用户敲的目标串（提示文案用）。 */
@@ -183,6 +283,12 @@ export interface DmDeliveryInput {
   dmReplyTarget: string | null;
   /** Pi / cmux / codex 的 Reply 行目标（远端 DM 需要 `x@peer`，本地 DM 不传）。 */
   anyReplyTarget?: string;
+  /**
+   * Claude 目标走带回执的唤醒（docs/wake-protocol.md §6）。不传＝旧的无回执路径。
+   * sender：终态没送达时通知谁（null 不通知）。followUp：措辞里能不能承诺「没送达会通知你」——
+   * 没有可通知的发送方会话（裸 shell、远端发送方）时必须是 false，终态只进频道日志。
+   */
+  receipts?: { sender: NoticeSender | null; followUp: boolean };
   env?: NodeJS.ProcessEnv;
 }
 
@@ -208,12 +314,18 @@ export async function deliverDm(
       );
       return null;
     }
-    const [outcome] = await wakeSessions([resolved.claude], {
+    const claudeInput: WakeInput = {
       ...input.wakeInput,
       ...(input.dmReplyTarget !== null ? { dmReplyTarget: input.dmReplyTarget } : {}),
       env,
-    });
+    };
     const label = `${resolved.claude.name ?? "?"}(pid ${resolved.claude.pid})`;
+    if (input.receipts !== undefined) {
+      const wake = await wakeClaudeTracked(resolved.claude, claudeInput, { sender: input.receipts.sender, env });
+      reportTrackedWake(label, wake, M, sink, { followUp: input.receipts.followUp });
+      return resolved.claude;
+    }
+    const [outcome] = await wakeSessions([resolved.claude], claudeInput);
     if (outcome!.result.ok) sink.log(M.wakeDelivered(label));
     else {
       const failure = outcome!.result;

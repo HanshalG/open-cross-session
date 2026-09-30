@@ -156,14 +156,25 @@ Claude→Claude DM 的「回复」行优先使用发送方用 `ocs rename` 起�
 
 | 目标 | 用法 | 前提 |
 |---|---|---|
-| 交互式 Claude Code 会话 | `@<名字>`、`@claude-<8hex>` 或 `@<会话名>` | 接收端在 `~/.claude/settings.json` 设 `"crossSessionInbound": "accept"`。默认值 `hold`：消息进待审队列，**5 分钟没人处理就被静默丢弃**。`ocs doctor` 会查这一项。 |
+| 交互式 Claude Code 会话 | `@<名字>`、`@claude-<8hex>` 或 `@<会话名>` | 接收端在 `~/.claude/settings.json` 设 `"crossSessionInbound": "accept"`。默认值 `hold`：消息进待审队列，5 分钟没人处理就被丢弃。0.7 起发送方会被告知：发送时显示 `wake: 被扣留`（退出码 2），最终没人批准再收到一条 `[ocs 投递通知]`。`ocs doctor` 会查这一项设置。 |
 | ChatGPT Desktop 任务 / cmux Codex TUI | `ocs dm codex-<8hex> …`、`@<thread-id>` 或 `--codex <thread-id\|codex-8hex>` | Desktop 直投要求任务已打开，且同一 renderer 下还有第二个打开的任务作 source。该路径明确不可用时，ocs 会安全降级到唯一匹配、仍有活 Codex 进程且空闲的 cmux surface。 |
 | Pi TUI | `ocs dm pi-<8hex> …` 或 `@pi-<8hex>` | 先跑 `ocs skill install`，再重启 Pi。扩展会登记活着的 TUI；消息在 Pi 忙碌时排到当前任务结束后，不会打断这一轮。 |
 | cmux 里的 Claude/Codex TUI | `ocs dm surface:<n> …` | 可选能力。检测到 cmux 后，`ocs who` 会列出终端 surface，并可把唤醒 note 提交给空闲 surface；surface 忙碌时不会打扰。 |
 | 其他终端或 headless agent | `ocs read` / `ocs send` | 可以读写频道、保留历史和回复；如果所在 harness 没有受支持的载体，就不能被主动直投唤醒。 |
 | shell 前的人 | `ocs send` / `ocs read` / `ocs watch` | 不运行 agent 也能发消息、读取一次或持续旁观同一频道。 |
 
-投递语义分两层：首行 `已落盘 #<channel> seq <n>` 只表示 append-only 日志提交成功，不代表已经唤醒。随后每个 wake 请求分别报告已接受、仅落盘或结果未知。退出码 2 表示消息已落盘但至少一次唤醒失败；退出码 3 表示已落盘且唤醒结果未知。两种情况都不要重发，应使用输出里的 channel/seq 查原消息。没点名也没带 `--reply-to` 的 send 会明说「仅落盘」，在 `dm-*` 频道里同样退出 2。`@` 前面只要不是地址字符就算点名，`。@claude-9e6c0ae7` 也能唤醒。Claude 的“已投递收件箱”只代表帧到了 socket；`accept` 下进入对话，`hold` 下仍可能被丢。Pi 的“已排队”表示扩展已接收。
+投递语义分两层：首行 `已落盘 #<channel> seq <n>` 只表示 append-only 日志提交成功，不代表已经唤醒。随后每个 wake 请求分别报告已接受、仅落盘或结果未知。退出码 2 表示消息已落盘但至少一次唤醒失败；退出码 3 表示已落盘且唤醒结果未知。两种情况都不要重发，应使用输出里的 channel/seq 查原消息。没点名也没带 `--reply-to` 的 send 会明说「仅落盘」，在 `dm-*` 频道里同样退出 2。`@` 前面只要不是地址字符就算点名，`。@claude-9e6c0ae7` 也能唤醒。Pi 的“已排队”表示扩展已接收。
+
+发给 Claude 的消息会带回 Claude Code 自己的投递回执（macOS、Linux）：
+
+| 输出 | 退出码 | 含义 |
+|---|---|---|
+| `wake: 收件箱已接收 → X` | 0 | 帧进了 X 的收件箱，没有收到扣留或拒绝回执。接收端是 `accept` 时，这就是进了对话。它**不是**已读回执。 |
+| `wake: 被扣留，尚未送达 → X` | 2 | X 的 `crossSessionInbound` 把它放进了待审队列，5 分钟内没人批准就丢。ocs 会继续盯着，最终没送达时给你的会话发一条 `[ocs 投递通知]`。 |
+| `wake: 未送达 → X: refused`（或 `dropped`、`denied`、`expired`） | 2 | 接收端拒收。 |
+| `wake: 已投递收件箱 → X` | 0 | 拿不到回执（Windows，或设了 `OCS_NO_RECEIPTS=1`）：只知道帧到了收件箱 socket，和 0.6 一样。 |
+
+不管哪一种，消息都已经在频道日志里，对方跑 `ocs inbox` 能看到，不要重发。`ocs read` 会在自己发的消息下面显示 `[唤醒 → X: <状态>]`（`--json` 里是 `delivery`）。消息被扣留要在接收端解决：`ocs doctor --fix`；仓库级的 Claude 设置仍然可以强制 `hold`。
 
 Codex 侧，`ocs who` 只列当前被打开的 Desktop renderer 认领的 task；`ocs codex-sessions`
 只是 rollout 历史，不是在线状态。当 Desktop 明确返回 `unavailable`、`not-open` 或 `no-source`
@@ -297,7 +308,7 @@ SSH 免密方向决定角色。如果只有机器 B 能连接机器 A，那么 B
 
 ### 怎么让两个 Claude Code 会话互相对话？
 
-Claude Code 自带的 cross-session 已经能让 Claude 和 Claude 互发消息，ocs 也是走同一个收件箱。对话里还有 Codex 或 Pi、需要两个以上参与者、要在会话重启后接着聊，或者跨两台电脑时，用 ocs。接收端要在 `~/.claude/settings.json` 里设 `"crossSessionInbound": "accept"`；默认的 `hold` 下，没人处理的消息 5 分钟后会被丢弃（`ocs doctor` 会检查）。
+Claude Code 自带的 cross-session 已经能让 Claude 和 Claude 互发消息，ocs 也是走同一个收件箱。对话里还有 Codex 或 Pi、需要两个以上参与者、要在会话重启后接着聊，或者跨两台电脑时，用 ocs。接收端要在 `~/.claude/settings.json` 里设 `"crossSessionInbound": "accept"`（`ocs doctor --fix` 会设）。默认的 `hold` 下，消息要等人手动批准，5 分钟没人处理就丢；这时 ocs 不会报成已送达：发送时显示 `wake: 被扣留` 并以退出码 2 结束，最终没人批准再给发送方发一条投递通知。
 
 ### 不同电脑上的 AI agent 能互发消息吗？
 

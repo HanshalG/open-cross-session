@@ -3,7 +3,8 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { join } from "node:path";
 import { CLAUDE_NATIVE_SESSIONS_DIR_ENV } from "../src/claude-inject.ts";
-import { OCS_HOME_ENV } from "../src/store.ts";
+import { OCS_HOME_ENV, readReceipts } from "../src/store.ts";
+import { fakeClaudeInbox, type FakeInbox } from "./fake-claude";
 import { autoCleanupTempDirs, tempDir } from "./tmp";
 
 autoCleanupTempDirs();
@@ -26,6 +27,7 @@ interface Box {
   env: Record<string, string>;
   frames: string[];
   server: Server;
+  inbox: FakeInbox;
 }
 
 function box(name: string, sessionName: string, sessionId: string, discoveryPort: number): Box {
@@ -33,17 +35,9 @@ function box(name: string, sessionName: string, sessionId: string, discoveryPort
   const sessionsDir = join(dir, "sessions");
   mkdirSync(sessionsDir, { mode: 0o700 });
   const sockPath = join(dir, "inbox.sock");
-  const frames: string[] = [];
-  const server = createServer((socket) => {
-    let buf = "";
-    socket.on("data", (chunk) => {
-      buf += chunk.toString("utf8");
-    });
-    socket.on("end", () => {
-      if (buf !== "") frames.push(buf);
-    });
-  });
-  server.listen(sockPath);
+  // 会回执的假收件箱（默认 accept：一条回执都不回）。
+  const inbox = fakeClaudeInbox(sockPath);
+  const { frames, server } = inbox;
   writeFileSync(
     join(sessionsDir, `${process.pid}.json`),
     JSON.stringify({ pid: process.pid, sessionId, name: sessionName, cwd: "/work", status: "idle", messagingSocketPath: sockPath }),
@@ -60,11 +54,14 @@ function box(name: string, sessionName: string, sessionId: string, discoveryPort
       [CLAUDE_NATIVE_SESSIONS_DIR_ENV]: sessionsDir,
       OCS_LANG: "en",
       OCS_UPGRADE_CHECK: "0",
+      OCS_RECEIPT_CLI_WAIT_MS: "20000",
+      OCS_RECEIPT_TERMINAL_WAIT_MS: "20000",
       OCS_LAN_DISCOVERY_PORT: String(discoveryPort),
       OCS_LAN_DISCOVERY_TARGETS: "127.0.0.1",
     },
     frames,
     server,
+    inbox,
   };
 }
 
@@ -146,7 +143,9 @@ describe("ocs lan 端到端（两台机器）", () => {
       const dm = await run(b, ["dm", "worker-a@alpha", "ping over the lan"]);
       expect(dm.code).toBe(0);
       expect(dm.stdout).toContain("dm stored on remote → claude-aaaaaaaa@alpha");
-      expect(dm.stdout).toContain("[alpha] wake: delivered to inbox");
+      // 守护进程走同一条带回执的唤醒：没有扣留/拒绝回执 → accepted，随应答回给发送方
+      expect(dm.stdout).toContain("[alpha] wake: accepted by inbox → worker-a");
+      expect(dm.stdout).not.toContain("(pid");
       const localCopy = /local copy #(lan-[0-9a-f]{32}) seq 1/.exec(dm.stdout);
       expect(localCopy).not.toBeNull();
       const wake = note(await waitFor(() => a.frames[0]));
@@ -169,6 +168,27 @@ describe("ocs lan 端到端（两台机器）", () => {
       const who = await run(b, ["who", "--lan"]);
       expect(who.stdout).toContain("LAN alpha (alpha):");
       expect(who.stdout).toContain("claude-aaaaaaaa@alpha  claude  idle  worker-a");
+
+      // A 的收件箱扣留（crossSessionInbound=hold）：第一阶段结果随应答回到 B，退出码 2；
+      // 终态只记在 A 的频道日志里，不跨机回传，也不通知任何人。
+      a.inbox.policy = "hold";
+      const framesA = a.frames.length;
+      const framesB = b.frames.length;
+      const heldDm = await run(b, ["dm", "worker-a@alpha", "held over the lan"]);
+      expect(heldDm.code).toBe(2);
+      expect(heldDm.stdout).toContain("[alpha] wake: HELD, not delivered yet → worker-a");
+      expect(heldDm.stdout).toContain("You will not be notified of the outcome");
+      expect(heldDm.stdout).not.toContain("ocs will notify this session");
+      // 远端（A）那份频道与 seq 在应答里；回执旁车帧记在那里
+      const remote = /dm stored on remote → \S+ \(channel (lan-[0-9a-f]{32}), seq (\d+)\)/.exec(heldDm.stdout)!;
+      const onA = () => (readReceipts(remote[1]!, { env: a.env }).get(Number(remote[2])) ?? []).map((r) => r.status);
+      await waitFor(() => (onA().includes("held") ? true : undefined));
+      await a.inbox.resolveHeld("expired");
+      await waitFor(() => (onA().includes("expired") ? true : undefined));
+      await new Promise((r) => setTimeout(r, 400));
+      expect(a.frames.length).toBe(framesA + 1); // 只有那条唤醒；A 上没有可通知的发送方会话
+      expect(b.frames.length).toBe(framesB); // 没有跨机终态通知
+      a.inbox.policy = "accept";
 
       // 解除配对后 A 再也进不了 B
       expect((await run(b, ["lan", "unpair", "alpha"])).code).toBe(0);

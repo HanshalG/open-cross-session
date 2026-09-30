@@ -22,6 +22,14 @@ interface Catalog {
   wakeSelfSkipped: string;
   wakeDelivered: (target: string) => string;
   wakeFailed: (target: string, reason: string) => string;
+  /** 投递回执（docs/wake-protocol.md §6）。followUp=false：发送方在另一台机器，终态不会回传。 */
+  wakeAccepted: (target: string) => string;
+  wakeHeld: (target: string, followUp: boolean) => string;
+  wakeConfirmed: (target: string) => string;
+  wakeNotDelivered: (target: string, status: string, reason: string) => string;
+  wakeHelperUnknown: (target: string, detail: string) => string;
+  deliveryNotice: (n: { seq: number; target: string; channel: string; status: string; reason: string }) => string;
+  readDelivery: (target: string, status: string) => string;
   /** 唤醒 note 首行（docs/wake-protocol.md §1）。sender=null 是骨架超预算时的降级档。 */
   wakeNoteHeader: (h: { sender: string | null; channel: string; seq: number; replyTo?: number; ago?: string }) => string;
   wakeNoteReply: (command: string) => string;
@@ -200,8 +208,8 @@ Usage:
       --reply-to <seq> also wakes the author of that seq.
       The wake note carries the body (≤4096 bytes) and a copy-paste Reply: line.
       Codex wake needs the target open plus a second open task owned by the same Desktop renderer.
-      Exit 2 = stored but wake failed; exit 3 = stored and outcome unknown. Do not resend either:
-      the stored #channel/seq is the correlation key.
+      Exit 2 = stored but wake failed, held or refused by the receiver; exit 3 = stored and
+      outcome unknown. Do not resend either: the stored #channel/seq is the correlation key.
   ocs read <channel> [--as <name>] [--since <seq>] [--json] [--peek] [--include-self]
       Read new messages since your cursor, then advance it (--peek: don't).
       Your own messages fold to one line unless --include-self.
@@ -241,6 +249,24 @@ Data directory: ~/.ocs (override with OCS_HOME). Language: OCS_LANG=en|zh.`,
   wakeDelivered: (target) => `wake: delivered to inbox → ${target}`,
   wakeFailed: (target, reason) =>
     `wake: stored-only → ${target}: ${reason} (message is already stored; do not resend)`,
+  wakeAccepted: (target) =>
+    `wake: accepted by inbox → ${target} (no hold/refuse receipt; this is not a read receipt)`,
+  wakeHeld: (target, followUp) =>
+    `wake: HELD, not delivered yet → ${target}: the receiver's crossSessionInbound gate is holding it for manual approval; it is dropped if nobody approves within 5 minutes. ${
+      followUp
+        ? "ocs will notify this session if it is not delivered."
+        : "You will not be notified of the outcome; it is recorded in the channel log on the receiving side."
+    } Message is stored; do not resend.`,
+  wakeConfirmed: (target) => `wake: delivered → ${target} (receiver confirmed)`,
+  wakeNotDelivered: (target, status, reason) =>
+    `wake: NOT delivered → ${target}: ${status}${reason ? ` (${reason})` : ""}. Message is stored and shows up in the peer's \`ocs inbox\`; do not resend.`,
+  wakeHelperUnknown: (target, detail) =>
+    `wake: outcome unknown → ${target}: ${detail}. The frame may have been written; do not resend (\`ocs read\` shows the delivery state once known).`,
+  deliveryNotice: ({ seq, target, channel, status, reason }) =>
+    `[ocs delivery notice] seq ${seq} to ${target} in #${channel} was held for approval and NOT delivered: ${status}${reason ? ` (${reason})` : ""}.\n` +
+    `The message is still in the channel log; ${target} will see it on \`ocs inbox\` / \`ocs read ${channel}\`. Do not resend.\n` +
+    `Fix on the receiving side: \`ocs doctor --fix\` (sets "crossSessionInbound": "accept" in ~/.claude/settings.json). A repo-level setting can still force hold.`,
+  readDelivery: (target, status) => `[wake → ${target}: ${status}]`,
   wakeNoteHeader: ({ sender, channel, seq, replyTo, ago }) => {
     const parts = [`seq ${seq}`];
     if (replyTo !== undefined) parts.push(`reply to seq ${replyTo}`);
@@ -483,8 +509,8 @@ const zh: Catalog = {
       --reply-to <seq> 同时唤醒那条消息的作者
       唤醒 note 直接带正文（≤4096 字节）和一行可直接复制的回复命令
       Codex 唤醒要求目标 task 已打开，并且同一 Desktop renderer 下另有一个已打开的 source task
-      退出码 2 = 消息已落盘但唤醒失败；退出码 3 = 已落盘且结果未知。两者都不要重发：
-      已落盘的 #channel/seq 就是追查键
+      退出码 2 = 消息已落盘但唤醒失败、被接收端扣留或拒绝；退出码 3 = 已落盘且结果未知。
+      两者都不要重发：已落盘的 #channel/seq 就是追查键
   ocs read <channel> [--as <name>] [--since <seq>] [--json] [--peek] [--include-self]
       从上次游标读新消息并推进游标；--peek 只读不推进
       自己发的消息默认折叠成一行，--include-self 完整显示
@@ -522,6 +548,21 @@ ${lanMessages("zh").help}
   wakeSelfSkipped: "（@ 到了自己，已跳过）",
   wakeDelivered: (target) => `wake: 已投递收件箱 → ${target}`,
   wakeFailed: (target, reason) => `wake: 仅落盘 → ${target}: ${reason}（消息已经落盘，请勿重发）`,
+  wakeAccepted: (target) => `wake: 收件箱已接收 → ${target}（没有收到扣留/拒绝回执；这不是已读回执）`,
+  wakeHeld: (target, followUp) =>
+    `wake: 被扣留，尚未送达 → ${target}：接收端的 crossSessionInbound 闸门把它放进了待审队列，5 分钟内没人批准就会被丢弃。${
+      followUp ? "没送达时 ocs 会通知本会话。" : "结果不会通知你，只记在接收端的频道日志里。"
+    }消息已经落盘，请勿重发。`,
+  wakeConfirmed: (target) => `wake: 已送达 → ${target}（接收端确认）`,
+  wakeNotDelivered: (target, status, reason) =>
+    `wake: 未送达 → ${target}: ${status}${reason ? `（${reason}）` : ""}。消息已经落盘，对方跑 \`ocs inbox\` 能看到；请勿重发。`,
+  wakeHelperUnknown: (target, detail) =>
+    `wake: 结果未知 → ${target}: ${detail}。帧可能已经写出，请勿重发（结果出来后 \`ocs read\` 会显示投递状态）。`,
+  deliveryNotice: ({ seq, target, channel, status, reason }) =>
+    `[ocs 投递通知] 发给 ${target} 的 #${channel} seq ${seq} 被扣留待审，最终没有送达：${status}${reason ? `（${reason}）` : ""}。\n` +
+    `消息还在频道日志里，${target} 跑 \`ocs inbox\` / \`ocs read ${channel}\` 能看到。请勿重发。\n` +
+    `根治：在接收端跑 \`ocs doctor --fix\`（把 ~/.claude/settings.json 的 "crossSessionInbound" 设为 "accept"）。仓库级设置仍可能强制 hold。`,
+  readDelivery: (target, status) => `[唤醒 → ${target}: ${status}]`,
   wakeNoteHeader: ({ sender, channel, seq, replyTo, ago }) => {
     const parts = [`seq ${seq}`];
     if (replyTo !== undefined) parts.push(`回复 seq ${replyTo}`);
