@@ -59,6 +59,16 @@ interface Catalog {
   piWakeUnavailable: (target: string) => string;
   piWakeSelfSkipped: (target: string) => string;
   piWakeAmbiguous: (target: string, matches: string[]) => string;
+  hermesWakeStarted: (target: string) => string;
+  hermesWakeQueued: (target: string) => string;
+  hermesWakeUnknownOutcome: (target: string, detail: string) => string;
+  hermesWakeFailed: (target: string, reason: string, detail: string) => string;
+  hermesWakeSelfSkipped: (target: string) => string;
+  doctorHermes: string;
+  doctorHermesHost: (role: string, pid: number, n: number) => string;
+  doctorHermesNoHost: (reason: string) => string;
+  doctorHermesSelf: (target: string, open: boolean) => string;
+  whoHermesHeader: string;
   dmCodexAmbiguous: (target: string, matches: string[]) => string;
   inboxEmpty: string;
   inboxHeader: (threads: number) => string;
@@ -241,7 +251,7 @@ Usage:
 ${lanMessages("en").help}
   ocs version | help
 
---as is optional inside Claude, Codex, and Pi sessions (auto-detected; OCS_NAME also works).
+--as is optional inside Claude, Codex, Pi, and Hermes sessions (auto-detected; OCS_NAME also works).
 Data directory: ~/.ocs (override with OCS_HOME). Language: OCS_LANG=en|zh.`,
   stored: (channel, seq) => `stored #${channel} seq ${seq}`,
   wakeNoMatch: (names) => `wake: no live Claude session matches @${names}`,
@@ -319,6 +329,20 @@ Data directory: ~/.ocs (override with OCS_HOME). Language: OCS_LANG=en|zh.`,
   piWakeSelfSkipped: (target) => `wake(pi): ${target} is this Pi session; skipped`,
   piWakeAmbiguous: (target, matches) =>
     `wake(pi): ${target} is open in multiple Pi processes: ${matches.join(", ")} — close the duplicate session`,
+  hermesWakeStarted: (target) => `wake(hermes): started a turn → ${target}`,
+  hermesWakeQueued: (target) => `wake(hermes): queued behind the running turn → ${target}`,
+  hermesWakeUnknownOutcome: (target, detail) =>
+    `wake(hermes): outcome unknown for ${target} (frame was written — do NOT resend)${detail ? `: ${detail}` : ""}`,
+  hermesWakeFailed: (target, reason, detail) =>
+    `wake(hermes): stored-only → ${target} (${reason})${detail ? `: ${detail}` : ""} (message is already stored; do not resend)`,
+  hermesWakeSelfSkipped: (target) => `wake(hermes): ${target} is this Hermes session; skipped`,
+  doctorHermes: "Hermes side",
+  doctorHermesHost: (role, pid, n) => `Hermes ${role} host reachable (pid ${pid}), ${n} open session(s)`,
+  doctorHermesNoHost: (reason) => `no reachable Hermes session host (${reason}) — open Hermes Desktop to message its sessions`,
+  doctorHermesSelf: (target, open) => open
+    ? `this process runs inside Hermes session ${target}, which is open — it can receive messages`
+    : `this process runs inside Hermes session ${target}, but the host does not list it as open — messages to it are stored only`,
+  whoHermesHeader: "Hermes sessions (wake: ocs dm hermes-<id> / @hermes-<id>; busy sessions queue it, nothing is interrupted)",
   dmCodexAmbiguous: (target, matches) =>
     `Codex address ${target} is ambiguous: ${matches.join(", ")} — use the full thread id from \`ocs who --verbose\``,
   inboxEmpty: "inbox: no unread threads for this identity",
@@ -460,7 +484,7 @@ Local ocs and hosted party coexist fine: your machine and your LAN (\`ocs lan\`)
   dmCmuxWoken: (ref) => `woke terminal ${ref} via cmux`,
   dmCmuxFailed: (ref, detail) => `cmux wake failed for ${ref}: ${detail}`,
   whoamiUnknown:
-    "cannot tell who you are: not inside a registered Claude/Codex/Pi session, and OCS_NAME is unset. Pass --as <name> or export OCS_NAME",
+    "cannot tell who you are: not inside a registered Claude/Codex/Pi/Hermes session, and OCS_NAME is unset. Pass --as <name> or export OCS_NAME",
   whoamiSessionNotFound: (sessionId) => `no live Claude session has sessionId ${sessionId}`,
   failInboxSessionWithAs: "--session and --as pick the identity in different ways; use one",
   whoRenameHint: "tip: `ocs rename <name>` gives this session a memorable address (its id keeps working too)",
@@ -483,7 +507,7 @@ Local ocs and hosted party coexist fine: your machine and your LAN (\`ocs lan\`)
   skillInstalled: (path) => `skill installed: ${path}`,
   piExtensionInstalled: (path) => `Pi direct-wake extension installed: ${path} — restart open Pi sessions`,
   failNoSelfName:
-    "cannot infer sender name (not inside a registered Claude/Codex/Pi session). Pass --as <name> or export OCS_NAME",
+    "cannot infer sender name (not inside a registered Claude/Codex/Pi/Hermes session). Pass --as <name> or export OCS_NAME",
   failName: (name) => `invalid name: ${name}`,
   failFlagRequired: (flag) => `--${flag} <value> is required`,
   failCodexAddress: (flag, value) =>
@@ -545,7 +569,7 @@ const zh: Catalog = {
 ${lanMessages("zh").help}
   ocs version | help
 
-在 Claude、Codex、Pi 会话里 --as 可省略（自动识别；OCS_NAME 也行）。
+在 Claude、Codex、Pi、Hermes 会话里 --as 可省略（自动识别；OCS_NAME 也行）。
 数据目录: ~/.ocs（OCS_HOME 可覆盖）。语言: OCS_LANG=en|zh。`,
   stored: (channel, seq) => `已落盘 #${channel} seq ${seq}`,
   wakeNoMatch: (names) => `wake: 没有匹配 @${names} 的活 Claude 会话`,
@@ -614,6 +638,20 @@ ${lanMessages("zh").help}
   piWakeSelfSkipped: (target) => `wake(pi): ${target} 是当前 Pi 会话，已跳过`,
   piWakeAmbiguous: (target, matches) =>
     `wake(pi): ${target} 同时被多个 Pi 进程打开：${matches.join("、")}——请关闭重复会话`,
+  hermesWakeStarted: (target) => `wake(hermes): 已开始新一轮 → ${target}`,
+  hermesWakeQueued: (target) => `wake(hermes): 已排在当前这一轮后面 → ${target}`,
+  hermesWakeUnknownOutcome: (target, detail) =>
+    `wake(hermes): ${target} 结果未知（帧已写出——不要重发）${detail ? `：${detail}` : ""}`,
+  hermesWakeFailed: (target, reason, detail) =>
+    `wake(hermes): 仅落盘 → ${target}（${reason}）${detail ? `：${detail}` : ""}（消息已写入，不要重发）`,
+  hermesWakeSelfSkipped: (target) => `wake(hermes): ${target} 是当前 Hermes 会话，已跳过`,
+  doctorHermes: "Hermes 侧",
+  doctorHermesHost: (role, pid, n) => `Hermes ${role} 宿主可连（pid ${pid}），${n} 个打开的会话`,
+  doctorHermesNoHost: (reason) => `连不上 Hermes 会话宿主（${reason}）——打开 Hermes Desktop 后才能给它的会话发消息`,
+  doctorHermesSelf: (target, open) => open
+    ? `当前进程在 Hermes 会话 ${target} 里，该会话已打开，能收消息`
+    : `当前进程在 Hermes 会话 ${target} 里，但宿主没把它列为打开——发给它的消息只会落盘`,
+  whoHermesHeader: "Hermes 会话（唤醒: ocs dm hermes-<id> / @hermes-<id>；对方忙时排队，不打断）",
   dmCodexAmbiguous: (target, matches) =>
     `Codex 地址 ${target} 不唯一：${matches.join("、")}——请从 \`ocs who --verbose\` 复制完整 thread id`,
   inboxEmpty: "inbox：当前身份没有未读线程",
@@ -746,7 +784,7 @@ ${lanMessages("zh").help}
   dmCmuxBusy: (ref) => `${ref} 正在跑一轮，不打断。消息已在频道里，它下轮会读到；也可稍后重试`,
   dmCmuxWoken: (ref) => `已经由 cmux 唤醒终端 ${ref}`,
   dmCmuxFailed: (ref, detail) => `cmux 唤醒 ${ref} 失败: ${detail}`,
-  whoamiUnknown: "认不出你是谁：不在已登记的 Claude/Codex/Pi 会话里，OCS_NAME 也没设。用 --as <name> 或 export OCS_NAME",
+  whoamiUnknown: "认不出你是谁：不在已登记的 Claude/Codex/Pi/Hermes 会话里，OCS_NAME 也没设。用 --as <name> 或 export OCS_NAME",
   whoamiSessionNotFound: (sessionId) => `没有 sessionId 为 ${sessionId} 的活 Claude 会话`,
   failInboxSessionWithAs: "--session 和 --as 是两种指定身份的方式，只能用一个",
   whoRenameHint: "提示：`ocs rename <名字>` 给当前会话起个好记的地址（原 id 照样能用）",
@@ -764,7 +802,7 @@ ${lanMessages("zh").help}
   renameLiveCollision: (name, pid) => `${name} 是 pid ${pid} 的活 Claude 会话名；精确会话名优先，换一个名字`,
   skillInstalled: (path) => `技能已安装: ${path}`,
   piExtensionInstalled: (path) => `Pi 直投扩展已安装: ${path}——已打开的 Pi 会话需要重启`,
-  failNoSelfName: "推断不出发送者名字（不在已登记的 Claude/Codex/Pi 会话里）。用 --as <name> 或 export OCS_NAME",
+  failNoSelfName: "推断不出发送者名字（不在已登记的 Claude/Codex/Pi/Hermes 会话里）。用 --as <name> 或 export OCS_NAME",
   failName: (name) => `名字不合法: ${name}`,
   failFlagRequired: (flag) => `--${flag} <value> 是必填项`,
   failCodexAddress: (flag, value) =>

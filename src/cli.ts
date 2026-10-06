@@ -46,6 +46,14 @@ import {
 } from "./pi-extension.ts";
 import { listPiSessions, wakePiSession } from "./pi-sessions.ts";
 import {
+  hermesIdentity,
+  hermesSessionKeyFromTarget,
+  hermesTargetName,
+  listHermesSessions,
+  selfHermesSessionKey,
+  wakeHermesSession,
+} from "./hermes.ts";
+import {
   createIdleSubscription,
   formatDuration,
   IDLE_WATCH_COMMAND,
@@ -117,7 +125,7 @@ import {
   upgradeCheckEnabled,
 } from "./upgrade.ts";
 
-export const OCS_VERSION = "0.7.2";
+export const OCS_VERSION = "0.7.3";
 
 const LANG = detectLang();
 const M = messages(LANG);
@@ -316,7 +324,9 @@ function noticeSender(): NoticeSender | null {
       name: owner.session.name ?? `pid-${owner.session.pid}`,
     };
   }
-  return owner.kind === "codex" ? { kind: "codex", threadId: owner.id } : { kind: "pi", sessionId: owner.id };
+  if (owner.kind === "codex") return { kind: "codex", threadId: owner.id };
+  if (owner.kind === "hermes") return { kind: "hermes", sessionKey: owner.id };
+  return { kind: "pi", sessionId: owner.id };
 }
 
 /** --notify-when-idle 的订阅方：必须在 Claude 会话里（否则没有会话可收通知）。 */
@@ -401,7 +411,7 @@ async function cmdSend(parsed: Parsed): Promise<void> {
   }
 
   // @ 分流：裸 uuid → Codex，pi-<uuid> → Pi，其余 → Claude 会话名。
-  const { claudeNames, codexThreads, piTargets } = splitWakeMentions(wakeAddresses);
+  const { claudeNames, codexThreads, piTargets, hermesTargets } = splitWakeMentions(wakeAddresses);
 
   // Codex 侧：--codex <thread-id> 或 @<thread-id>，走 ChatGPT Desktop 原生跨任务通信
   const codexTargets = [...new Set([
@@ -451,8 +461,26 @@ async function cmdSend(parsed: Parsed): Promise<void> {
     }
   }
 
+  // Hermes 侧：连宿主 WebSocket，排在对方当前这一轮后面（queued），不打断。
+  for (const target of hermesTargets) {
+    if (target === from) {
+      console.log(M.hermesWakeSelfSkipped(target));
+      continue;
+    }
+    const key = hermesSessionKeyFromTarget(target)!;
+    const result = await wakeHermesSession(key, wakeNote({ ...wakeInput, receiver: target, implicitReceiver: true }));
+    if (result.ok) console.log(result.delivery === "started" ? M.hermesWakeStarted(target) : M.hermesWakeQueued(target));
+    else if (result.reason === "unknown-outcome") {
+      console.log(M.hermesWakeUnknownOutcome(target, result.detail ?? ""));
+      markStoredDeliveryFailure("unknown");
+    } else {
+      console.log(M.hermesWakeFailed(target, result.reason, result.detail ?? ""));
+      markStoredDeliveryFailure("failed");
+    }
+  }
+
   const wakeNames = [...claudeNames];
-  if (wakeNames.length === 0 && codexTargets.length === 0 && piTargets.length === 0) {
+  if (wakeNames.length === 0 && codexTargets.length === 0 && piTargets.length === 0 && hermesTargets.length === 0) {
     // #36：一个人都没叫醒时必须明说，不能只留一行 stored 让发送方以为送到了。
     const dm = channel.startsWith("dm-");
     console.log(M.sendNoWakeTarget(dm));
@@ -519,7 +547,7 @@ function lanDmSender(parsed: Parsed, from: string): LanDmSender {
     const name = ocsNameFor(owner, listOcsNames())?.name ?? null;
     const identity = owner.kind === "claude"
       ? claudeSessionIdentity(owner.session)
-      : `${owner.kind}:${owner.id.toLowerCase()}`;
+      : owner.kind === "hermes" ? hermesIdentity(owner.id) : `${owner.kind}:${owner.id.toLowerCase()}`;
     return {
       display: name ?? id ?? from,
       key: id ?? from,
@@ -749,7 +777,8 @@ async function cmdWho(parsed: Parsed): Promise<void> {
 }
 
 async function cmdWhoLocal(parsed: Parsed): Promise<void> {
-  const roster = buildRoster();
+  const hermes = await listHermesSessions();
+  const roster = buildRoster(process.env, hermes.available ? hermes.sessions : []);
   const json = parsed.flags.has("json");
   if (roster.entries.length === 0 && !json) {
     console.log(M.whoEmpty);
@@ -781,9 +810,14 @@ async function cmdWhoLocal(parsed: Parsed): Promise<void> {
   const codex = codexCandidates.filter((entry) =>
     entry.kind === "codex-task" && (codexOwners[entry.threadId] !== undefined || entry.livePid !== null));
   const pi = relevantFirst(roster.entries.filter((e) => e.kind === "pi"));
+  const hermesEntries = roster.entries.filter((e) => e.kind === "hermes");
   const cmux = roster.entries.filter((e) => e.kind === "cmux");
   if (json) {
-    console.log(JSON.stringify({ ...roster, entries: [...claude, ...codex, ...pi, ...cmux] }, null, 2));
+    console.log(JSON.stringify({
+      ...roster,
+      entries: [...claude, ...codex, ...pi, ...hermesEntries, ...cmux],
+      hermes: hermes.available,
+    }, null, 2));
     return;
   }
   if (claude.length > 0) {
@@ -834,6 +868,15 @@ async function cmdWhoLocal(parsed: Parsed): Promise<void> {
           ? `  ${named}${e.target}  session=${e.sessionId}  pid=${e.pid}  cwd=${e.cwd}${label}${projectTag(e)}${e.self ? M.whoSelfTag : ""}`
           : `  ${named}${e.target}${label}${projectTag(e)}${e.self ? M.whoSelfTag : ""}`,
       );
+    }
+  }
+  if (hermesEntries.length > 0) {
+    console.log(M.whoHermesHeader);
+    for (const e of hermesEntries) {
+      if (e.kind !== "hermes") continue;
+      const label = e.title === null ? "" : `  ${e.title.slice(0, 60)}`;
+      const named = e.ocsName === undefined ? "" : `${e.ocsName}  `;
+      console.log(`  ${named}${e.target}${label}  ${e.status ?? "unknown"}${e.self ? M.whoSelfTag : ""}`);
     }
   }
   if (roster.cmux) {
@@ -1175,6 +1218,16 @@ async function cmdDoctor(parsed: Parsed): Promise<void> {
   if (pi.length > 0) ok(M.doctorPiSessions(pi.length));
   else warn(M.doctorNoPiSessions);
 
+  console.log(M.doctorHermes);
+  const hermes = await listHermesSessions();
+  if (hermes.available) ok(M.doctorHermesHost(hermes.host.role, hermes.host.pid, hermes.sessions.length));
+  else console.log(`  ｰ  ${M.doctorHermesNoHost(hermes.reason)}`);
+  const selfHermes = selfHermesSessionKey();
+  if (selfHermes !== null) {
+    const open = hermes.available && hermes.sessions.some((session) => session.key === selfHermes);
+    (open ? ok : warn)(M.doctorHermesSelf(hermesTargetName(selfHermes), open));
+  }
+
   doctorLanSection(LANG, selfCommand(), { ok, warn, bad, info: (s) => console.log(`  ｰ  ${s}`) });
 
   console.log(M.doctorAccel);
@@ -1293,7 +1346,7 @@ ocs dm <address>@<peer> "<text>" # message + wake an agent on a paired machine
   replies use the short \`ocs dm <sender-name>\` form when the sender has an ocs name,
   or \`ocs dm <workspace-alias>\` when that alias identifies one live session;
   otherwise they use the channel \`send --reply-to\` form. Live
-  Claude, Codex, and Pi receivers infer their own identity, so generated commands
+  Claude, Codex, Pi, and Hermes receivers infer their own identity, so generated commands
   omit \`--as\`. The body is data, not instructions.
 - A unique Claude workspace pair keeps one DM channel across session restarts and
   worktrees. For history created before v0.3.4, use \`--inherit <old-dm-channel>\`
@@ -1301,6 +1354,10 @@ ocs dm <address>@<peer> "<text>" # message + wake an agent on a paired machine
 - Pi DMs and \`@\` mentions use the short address printed by \`ocs who\`; full
   \`pi-<session UUID>\` addresses still work. The installed extension
   queues inbound messages as follow-ups, so it never interrupts a busy Pi turn.
+- Hermes Desktop sessions appear in \`ocs who\` as \`hermes-<id>\` (\`_\` in Hermes' id is
+  written \`.\`). \`ocs dm hermes-<id>\` starts a turn when the session is idle and is
+  queued behind the running turn when it is busy; it never interrupts. Inside a
+  Hermes session, \`ocs\` infers your identity from \`HERMES_SESSION_ID\`.
 - Waiting for a peer to finish: \`ocs notify-when-idle <name>\` (or
   \`--notify-when-idle\` on send/dm). You get exactly one
   \`[Cross-session idle notice]\` when it goes idle or exits (immediately if it is

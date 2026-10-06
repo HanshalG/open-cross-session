@@ -2,7 +2,8 @@
 //
 // 目标体验：人只说自然语言，agent 自己跑 `ocs who` 发现同伴、`ocs dm` 搭话。
 // 四个命名空间统一在这里：Claude 原生会话（UDS 可唤醒）、ChatGPT Desktop 任务
-// （IPC 可唤醒）、Pi 会话（扩展 UDS 可唤醒）、cmux surface（可选加速器，探测到才列）。
+// （IPC 可唤醒）、Pi 会话（扩展 UDS 可唤醒）、Hermes 会话（宿主 WebSocket 排队投递）、
+// cmux surface（可选加速器，探测到才列）。
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -31,6 +32,13 @@ import {
   piTargetName,
   type PiSessionRegistration,
 } from "./pi-sessions.ts";
+import {
+  hermesIdentity,
+  hermesSessionKeyFromTarget,
+  hermesTargetName,
+  selfHermesSessionKey,
+  type HermesSession,
+} from "./hermes.ts";
 import { findSelfClaudePid } from "./wake.ts";
 import {
   knownClaudeWorkspaceIdentities,
@@ -78,7 +86,8 @@ function safeVerifiedWorkspaceIdentity(
 }
 
 /**
- * 识别「我是谁」：--as > $OCS_NAME > Pi session id > Claude 原生会话 > Codex thread id。
+ * 识别「我是谁」：--as > $OCS_NAME > Pi session id > Claude 原生会话 > Codex thread id > Hermes 会话。
+ * Hermes 排最后：它把 HERMES_SESSION_ID 注入每条终端命令，在 Hermes 里开的 Claude/Codex 也会继承。
  * agent 在自己的会话里跑 ocs 时自动识别，人一个字都不用打。
  */
 export function resolveSelfName(env: NodeJS.ProcessEnv = process.env): string | null {
@@ -92,9 +101,9 @@ export function resolveSelfName(env: NodeJS.ProcessEnv = process.env): string | 
     if (session?.name !== null && session?.name !== undefined) return session.name;
   }
   const codexThreadId = env[CODEX_THREAD_ID_ENV];
-  return typeof codexThreadId === "string" && isCodexThreadId(codexThreadId)
-    ? codexThreadId.toLowerCase()
-    : null;
+  if (typeof codexThreadId === "string" && isCodexThreadId(codexThreadId)) return codexThreadId.toLowerCase();
+  const hermesKey = selfHermesSessionKey(env);
+  return hermesKey === null ? null : hermesTargetName(hermesKey);
 }
 
 /**
@@ -298,6 +307,17 @@ export type RosterEntry =
       cwd: string;
       self: boolean;
     }
+  | {
+      kind: "hermes";
+      /** `hermes-<session key>`：可直接交给 `ocs dm`。 */
+      target: string;
+      sessionKey: string;
+      title: string | null;
+      ocsName?: string;
+      /** Hermes 自己的状态词：idle / working / starting / waiting。 */
+      status: string | null;
+      self: boolean;
+    }
   | { kind: "cmux"; ref: string; title: string };
 
 export interface Roster {
@@ -309,7 +329,11 @@ export interface Roster {
   home: string;
 }
 
-export function buildRoster(env: NodeJS.ProcessEnv = process.env): Roster {
+/**
+ * `hermes`：调用方先 await `listHermesSessions()` 拿到的活会话（要连 WebSocket，这里是同步的）。
+ * 不传就不列 Hermes。
+ */
+export function buildRoster(env: NodeJS.ProcessEnv = process.env, hermes: readonly HermesSession[] = []): Roster {
   const entries: RosterEntry[] = [];
   const selfPid = findSelfClaudePid(env);
   const nativeSessions = listNativeSessions(env).filter((session) => session.name !== null);
@@ -382,6 +406,19 @@ export function buildRoster(env: NodeJS.ProcessEnv = process.env): Roster {
       self: selfPiSessionId === s.session_id,
     });
   }
+  const selfHermesKey = selfHermesSessionKey(env);
+  for (const s of hermes) {
+    const ocsName = ocsNameFor({ kind: "hermes", id: s.key }, names)?.name;
+    entries.push({
+      kind: "hermes",
+      target: hermesTargetName(s.key),
+      sessionKey: s.key,
+      title: s.title,
+      ...(ocsName === undefined ? {} : { ocsName }),
+      status: s.status,
+      self: selfHermesKey === s.key,
+    });
+  }
   const cmux = cmuxAvailable();
   if (cmux) {
     for (const s of listCmuxSurfaces()) {
@@ -391,7 +428,7 @@ export function buildRoster(env: NodeJS.ProcessEnv = process.env): Roster {
   return { entries, codexIpc, codexQueue: codexQueueAvailable(env), cmux, home: ocsHome(env) };
 }
 
-export type DmTargetKind = "claude" | "codex-task" | "pi" | "cmux";
+export type DmTargetKind = "claude" | "codex-task" | "pi" | "hermes" | "cmux";
 
 export interface ResolvedDmTarget {
   kind: DmTargetKind;
@@ -425,6 +462,8 @@ export interface ResolvedDmTarget {
   threadId?: string;
   piSession?: PiSessionRegistration;
   piSessionId?: string;
+  /** Hermes 会话的持久 id。在不在线只有投递时连宿主才知道（解析是同步的）。 */
+  hermesSessionKey?: string;
   cmuxRef?: string;
 }
 
@@ -442,6 +481,8 @@ export function claudeSessionIdentity(session: Pick<NativeClaudeSession, "name" 
 export function selfIdentity(from: string): string {
   const piSessionId = piSessionIdFromTarget(from);
   if (piSessionId !== null) return `pi:${piSessionId}`;
+  const hermesKey = hermesSessionKeyFromTarget(from);
+  if (hermesKey !== null) return hermesIdentity(hermesKey);
   if (isCodexThreadId(from)) return `codex:${from.toLowerCase()}`;
   return `name:${from}`;
 }
@@ -517,6 +558,7 @@ function resolveNamedTarget(
 ): ResolvedDmTarget {
   if (named.kind === "codex") return { ...resolveDmTarget(named.id, env)!, via: "ocs-name" };
   if (named.kind === "pi") return { ...resolveDmTarget(piTargetName(named.id), env)!, via: "ocs-name" };
+  if (named.kind === "hermes") return { ...resolveDmTarget(hermesTargetName(named.id), env)!, via: "ocs-name" };
   const live = sessions.find((candidate) => claudeEntryMatches(named, candidate));
   if (live !== undefined) return { ...claudeTarget(live, sessions, env), via: "ocs-name" };
   return {
@@ -554,9 +596,11 @@ export function selfNameOwner(env: NodeJS.ProcessEnv = process.env): NameOwner |
     if (session !== undefined && session.sessionId !== null) return { kind: "claude", session };
   }
   const codexThreadId = env[CODEX_THREAD_ID_ENV];
-  return typeof codexThreadId === "string" && isCodexThreadId(codexThreadId)
-    ? { kind: "codex", id: codexThreadId.toLowerCase() }
-    : null;
+  if (typeof codexThreadId === "string" && isCodexThreadId(codexThreadId)) {
+    return { kind: "codex", id: codexThreadId.toLowerCase() };
+  }
+  const hermesKey = selfHermesSessionKey(env);
+  return hermesKey === null ? null : { kind: "hermes", id: hermesKey };
 }
 
 /**
@@ -565,7 +609,12 @@ export function selfNameOwner(env: NodeJS.ProcessEnv = process.env): NameOwner |
  * 交给既有的「没有匹配」报告。
  */
 export function canonicalWakeAddress(address: string, env: NodeJS.ProcessEnv = process.env): string {
-  if (!NAME_RE.test(address) || isCodexThreadId(address) || piSessionIdFromTarget(address) !== null) return address;
+  if (
+    !NAME_RE.test(address) ||
+    isCodexThreadId(address) ||
+    piSessionIdFromTarget(address) !== null ||
+    hermesSessionKeyFromTarget(address) !== null
+  ) return address;
   const shortId = CLAUDE_SHORT_TARGET_RE.test(address) ||
     CODEX_SHORT_TARGET_RE.test(address) ||
     PI_SHORT_TARGET_RE.test(address);
@@ -580,6 +629,7 @@ export function canonicalWakeAddress(address: string, env: NodeJS.ProcessEnv = p
   ) return address;
   if (resolved.kind === "codex-task" && resolved.threadId !== undefined) return resolved.threadId;
   if (resolved.kind === "pi" && resolved.piSessionId !== undefined) return piTargetName(resolved.piSessionId);
+  if (resolved.kind === "hermes" && resolved.hermesSessionKey !== undefined) return hermesTargetName(resolved.hermesSessionKey);
   if (resolved.kind === "claude" && resolved.claude?.name) return resolved.claude.name;
   return address;
 }
@@ -675,6 +725,10 @@ export function resolveDmTarget(
       piSessionId,
       ...(matches[0] === undefined ? {} : { piSession: matches[0] }),
     };
+  }
+  const hermesKey = hermesSessionKeyFromTarget(target);
+  if (hermesKey !== null) {
+    return { kind: "hermes", name: hermesTargetName(hermesKey), identity: hermesIdentity(hermesKey), hermesSessionKey: hermesKey };
   }
   if (!NAME_RE.test(target)) return null;
   const sessions = listNativeSessions(env).filter((session) => session.name !== null);

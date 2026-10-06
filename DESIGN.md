@@ -117,6 +117,16 @@
    `reason` 即注入 prompt（≤512B），机制全本地，只有「有没有新消息」一问走服务端。
 4. **Pi 侧**：全局扩展在 `session_start` 登记会话并监听 0600 Unix socket；收到 note 后用
    `pi.sendMessage(..., { deliverAs: "followUp", triggerTurn: true })` 注入，`session_shutdown` 关闭并清理。
+5. **Hermes 侧**（v0.7.3，#40）：不装插件。Hermes Desktop / `hermes serve` 的会话宿主讲 loopback
+   WebSocket JSON-RPC（Desktop 窗口用的同一条），并给同用户客户端发布 0600 的 rendezvous 记录 +
+   token（`~/.local/state/hermes/gateway-locks/host-<role>.{json,token}`）。ocs 每次连接都重读、
+   核对 token 指纹、只连 loopback；`session.active_list` 列打开的会话（持久 id = 地址，运行期 id
+   每次现查），`prompt.submit {queued:true}` 投递——不带 `queued` 会按 Hermes 默认的 busy 模式
+   打断当前这一轮。`streaming` = 空闲会话开始新一轮，`queued` = 排在当前这一轮之后；帧发出后无应答
+   = 结果未知，绝不重发。插件路线（`pre_llm_call` / `ctx.inject_message`）要改 Hermes 配置两处、
+   只回一个 bool，比宿主协议少信息。Hermes 把 `HERMES_SESSION_ID`（持久 id）注入每条终端命令，
+   `ocs whoami` 据此认出自己；身份解析里 Hermes 排最后（在 Hermes 里开的 Claude/Codex 会继承它）。
+   私有协议，宿主升级可能变：连不上一律按 unavailable 降级，消息留在频道。
 
 **可几乎原样复用**（零服务端依赖）：两个 session registry、
 `serve-wake-proxy` 全套、`codex-sessions` / `codex-session-kind` /

@@ -130,6 +130,7 @@ describe("Pi registration and wake transport", () => {
       piTargets: [target],
       codexThreads: [SESSION_ID],
       claudeNames: ["claude-worker"],
+      hermesTargets: [],
     });
   });
 });

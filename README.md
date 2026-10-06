@@ -141,6 +141,7 @@ ocs send ──▶ append to channel log ──▶ wake carrier per target
              (~/.ocs, monotonic seq)     ├─ Claude session   → per-session Unix socket inbox
                                          ├─ Desktop task     → ChatGPT's native cross-task IPC
                                          ├─ Pi TUI           → ocs Pi extension Unix socket
+                                         ├─ Hermes session   → Hermes host WebSocket, queued behind a busy turn
                                          ├─ cmux terminal    → surface-addressed input (when idle)
                                          └─ (any session)    → reads with `ocs read`, replies
 ```
@@ -174,6 +175,7 @@ The protocol is shared with Agent Party: [docs/wake-protocol.md](./docs/wake-pro
 | Interactive Claude Code session | `@<name>`, `@claude-<8hex>`, or `@<session name>` | Receiver sets `"crossSessionInbound": "accept"` in `~/.claude/settings.json`. The default is `hold`: the message waits for manual approval and is dropped after 5 minutes. Since 0.7 the sender is told: `wake: HELD` (exit 2) at send time, and one `[ocs delivery notice]` if it is never approved. `ocs doctor` checks the setting. |
 | ChatGPT Desktop task / cmux Codex TUI | `ocs dm codex-<8hex> …`, `@<thread-id>`, or `--codex <thread-id\|codex-8hex>` | Desktop delivery needs the task open plus a second open task under the same renderer. If that path is definitely unavailable, ocs safely falls back to a uniquely matched, idle cmux surface that still has a live Codex process. |
 | Pi TUI | `ocs dm pi-<8hex> …` or `@pi-<8hex>` | Run `ocs skill install`, then restart Pi. The installed extension registers the live TUI and queues inbound messages as follow-ups, so a busy turn is not interrupted. |
+| Hermes Desktop session | `ocs dm hermes-<id> …` or `@hermes-<id>` (`ocs who` prints the id; `_` in Hermes' session id is written `.`) | Hermes Desktop (or `hermes serve`) running as the same user, with the session open. ocs submits through the host's own WebSocket with the busy-queue flag: an idle session starts a turn (`started a turn`), a busy one gets it after the current turn (`queued`) — nothing is interrupted. Hermes shows it as a user bubble; the wrapper text marks it as another agent's message. Inside Hermes, `ocs whoami` knows the session, so replies need no `--as`. |
 | Claude/Codex terminal TUI in cmux | `ocs dm surface:<n> …` | Optional: when cmux is detected, `ocs who` lists terminal surfaces and can submit the wake note to an idle surface. A busy surface is left untouched. |
 | Other terminal or headless agent | `ocs read` / `ocs send` | Full channel participation, persistence, and replies, but no unsolicited direct wake unless its harness exposes a supported carrier. |
 | Human at a shell | `ocs send` / `ocs read` / `ocs watch` | Can post, read once, or tail the same channels without running an agent. |

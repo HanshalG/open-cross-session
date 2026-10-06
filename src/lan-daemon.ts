@@ -36,6 +36,7 @@ import { acceptSecure } from "./lan-wire.ts";
 import { claudeShortId, entryShortId, listOcsNames, ocsNameFor, readOcsName } from "./names.ts";
 import { buildRoster, resolveDmTarget, type ResolvedDmTarget } from "./roster.ts";
 import { codexThreadLivePid } from "./codex-queue.ts";
+import { hermesTargetName, listHermesSessions } from "./hermes.ts";
 import { codexDesktopIpcAvailable, discoverCodexDesktopOwners } from "./codex-ipc.ts";
 import { appendMessage, BODY_LIMIT, NAME_RE, OCS_IDENTITY_RE } from "./store.ts";
 
@@ -56,6 +57,9 @@ export const LAN_DAEMON_ENV_STRIP = [
   "CODEX_THREAD_ID",
   "OCS_NAME",
   "OCS_PI_SESSION_ID",
+  "HERMES_SESSION_ID",
+  "HERMES_SESSION_SOURCE",
+  "HERMES_UI_SESSION_ID",
 ];
 
 /** 两端各自落盘的会话频道：同一对（对端、本机参与者、远端参与者）恒落同一频道，收发同源。 */
@@ -98,12 +102,16 @@ export function localAddressOf(
     const key = `pi-${resolved.piSessionId.slice(0, 8)}`;
     return { key, display: ocsNameFor({ kind: "pi", id: resolved.piSessionId }, names)?.name ?? key };
   }
+  if (resolved.kind === "hermes" && resolved.hermesSessionKey !== undefined) {
+    const key = hermesTargetName(resolved.hermesSessionKey);
+    return { key, display: ocsNameFor({ kind: "hermes", id: resolved.hermesSessionKey }, names)?.name ?? key };
+  }
   return null;
 }
 
 export interface LanWhoEntry {
   address: string;
-  kind: "claude" | "codex" | "pi";
+  kind: "claude" | "codex" | "pi" | "hermes";
   status?: string;
   label?: string;
 }
@@ -125,7 +133,8 @@ async function desktopClaimed(threadIds: readonly string[], env: NodeJS.ProcessE
 /** 远端 who：只给地址、种类、状态和一句短标签，不给 pid / 路径。 */
 export async function lanWhoEntries(env: NodeJS.ProcessEnv = process.env): Promise<LanWhoEntry[]> {
   const out: LanWhoEntry[] = [];
-  const roster = buildRoster(env);
+  const hermes = await listHermesSessions({ env });
+  const roster = buildRoster(env, hermes.available ? hermes.sessions : []);
   const claimed = await desktopClaimed(
     roster.entries.flatMap((e) => (e.kind === "codex-task" && e.livePid === null ? [e.threadId] : [])),
     env,
@@ -143,6 +152,13 @@ export async function lanWhoEntries(env: NodeJS.ProcessEnv = process.env): Promi
         address: entry.ocsName ?? entry.target,
         kind: "codex",
         ...(entry.summary === null ? {} : { label: entry.summary.slice(0, 60) }),
+      });
+    } else if (entry.kind === "hermes") {
+      out.push({
+        address: entry.ocsName ?? entry.target,
+        kind: "hermes",
+        ...(entry.status === null ? {} : { status: entry.status }),
+        ...(entry.title === null ? {} : { label: entry.title.slice(0, 60) }),
       });
     } else if (entry.kind === "pi") {
       out.push({
@@ -207,6 +223,13 @@ export async function handleLanDm(
     if (!live) return { ok: false, error: "not-found" };
   }
   if (resolved.kind === "pi" && resolved.piSession === undefined) return { ok: false, error: "not-found" };
+  if (resolved.kind === "hermes") {
+    // 同 Pi：只投此刻打开的会话。宿主连不上 / 会话没开都不落盘，免得对端随手造频道。
+    const hermes = await listHermesSessions({ env });
+    if (!hermes.available || !hermes.sessions.some((session) => session.key === resolved.hermesSessionKey)) {
+      return { ok: false, error: "not-found" };
+    }
+  }
   const local = localAddressOf(resolved, to, env);
   if (local === null) return { ok: false, error: "not-found" };
 

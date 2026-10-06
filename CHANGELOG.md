@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.3
+
+**Hermes Desktop sessions can be messaged, locally and from paired machines (#40).** `ocs who` lists the sessions open in Hermes Desktop (or `hermes serve`) as `hermes-<id>`, `ocs dm hermes-<id>` / `@hermes-<id>` puts the message into that same conversation, and inside Hermes `ocs whoami` knows which session it is, so the agent replies with the `Reply:` line as-is.
+
+- 走 Hermes 宿主自己的本地 WebSocket（Desktop 窗口用的同一条），不装插件、不改 Hermes 配置。认证材料是 Hermes 发布给同一用户的 0600 token 文件；每次连接重读，核对指纹，只连 loopback
+- 投递一律带排队标记：空闲会话开始新一轮（`wake(hermes): started a turn`），忙的会话排在当前这一轮之后（`queued behind the running turn`），不打断正在跑的工具。宿主没开、会话没打开 → 仅落盘（退出码 2）；帧发出后没应答 → 结果未知（退出码 3），不重发
+- Hermes 里消息显示为用户气泡（宿主不允许外部客户端改作者），靠唤醒包装文字标明来源，正文照旧当数据处理
+- 地址：Hermes 会话 id 里的 `_` 写成 `.`（`hermes-20261006.124023.6626fe`），因为 ocs 名字和 @ 提及不含 `_`
+- 局域网：`ocs who --lan` 列出对端打开的 Hermes 会话（对端和本机都要 0.7.3，旧版本会跳过这类条目）；远端 DM 只投此刻打开的会话，否则 `not-found` 不落盘
+- `ocs doctor` 新增 Hermes 一节：宿主连不连得上、几个打开的会话、当前进程是不是在某个 Hermes 会话里、那个会话能不能收消息
+- 真机验证（macOS，Hermes Agent 0.21.5 + Hermes Desktop）：另一台 Mac 上的 Claude Code 经局域网发 DM → 同一个 Hermes 对话收到并开始新一轮 → Hermes 用 `ocs` 回复送回发送方 → 第二轮仍进同一个对话；对方忙时第三条报 `queued`
+- 只覆盖 Hermes Desktop / `hermes serve` 托管的会话；终端里单独跑的 `hermes` / `--tui` 不在宿主里，暂不支持
+
 ## 0.7.2
 
 **Windows: native Pi TUI sessions can receive messages (#39).** The Pi extension listened on a `.sock` file under `~/.ocs/pi-inbox`, which native Windows Node refuses with `EACCES`, so Windows Pi sessions never showed up in `ocs who` and could not be messaged locally or from a paired machine.

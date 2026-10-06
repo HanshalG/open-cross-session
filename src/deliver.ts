@@ -8,6 +8,7 @@
 import { resolveSessionSocketByPid, type NativeClaudeSession } from "./claude-inject.ts";
 import { codexHosts, codexThreadLivePid, psTable, queueCodexThread } from "./codex-queue.ts";
 import type { messages } from "./i18n.ts";
+import { hermesTargetName, wakeHermesSession, type HermesWakeResult } from "./hermes.ts";
 import { listPiSessions, wakePiSession } from "./pi-sessions.ts";
 import {
   CODEX_THREAD_ID_ENV,
@@ -218,7 +219,22 @@ const SELF_ENV_KEYS = [
   "CODEX_THREAD_ID",
   "OCS_NAME",
   "OCS_PI_SESSION_ID",
+  "HERMES_SESSION_ID",
+  "HERMES_SESSION_SOURCE",
 ];
+
+/** Hermes 投递结果 → 一行输出 + 失败分级（unknown 绝不重发）。 */
+function reportHermesWake(label: string, result: HermesWakeResult, M: Catalog, sink: DeliverySink): void {
+  if (result.ok) {
+    sink.log(result.delivery === "started" ? M.hermesWakeStarted(label) : M.hermesWakeQueued(label));
+  } else if (result.reason === "unknown-outcome") {
+    sink.log(M.hermesWakeUnknownOutcome(label, result.detail ?? ""));
+    sink.fail("unknown");
+  } else {
+    sink.log(M.hermesWakeFailed(label, result.reason, result.detail ?? ""));
+    sink.fail("failed");
+  }
+}
 
 /**
  * 把一条 ocs 自己生成的通知（投递回执通知）按发送方的 harness 投回去。走的是同一套载体，
@@ -253,6 +269,10 @@ export async function deliverNotice(
   for (const key of SELF_ENV_KEYS) delete clean[key];
   if (target.kind === "codex") {
     await deliverToCodexTask(target.threadId, input, M, sink, undefined, clean);
+    return;
+  }
+  if (target.kind === "hermes") {
+    reportHermesWake(hermesTargetName(target.sessionKey), await wakeHermesSession(target.sessionKey, note, { env: clean }), M, sink);
     return;
   }
   const session = listPiSessions(clean).find((candidate) => candidate.session_id.toLowerCase() === target.sessionId.toLowerCase());
@@ -355,6 +375,16 @@ export async function deliverDm(
       sink.log(M.piWakeFailed(resolved.name, result.reason, result.detail ?? ""));
       sink.fail("failed");
     }
+    return null;
+  }
+  if (resolved.kind === "hermes" && resolved.hermesSessionKey !== undefined) {
+    // 不在线（宿主没开、会话没打开）→ wakeHermesSession 报 unavailable / not-open：消息已在频道里。
+    const result = await wakeHermesSession(
+      resolved.hermesSessionKey,
+      wakeNote({ ...input.wakeInput, ...anyReply, receiver: resolved.name, implicitReceiver: true }),
+      { env },
+    );
+    reportHermesWake(resolved.name, result, M, sink);
     return null;
   }
   if (resolved.kind === "cmux" && resolved.cmuxRef !== undefined) {

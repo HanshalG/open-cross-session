@@ -159,6 +159,7 @@ Claude→Claude DM 的「回复」行优先使用发送方用 `ocs rename` 起�
 | 交互式 Claude Code 会话 | `@<名字>`、`@claude-<8hex>` 或 `@<会话名>` | 接收端在 `~/.claude/settings.json` 设 `"crossSessionInbound": "accept"`。默认值 `hold`：消息进待审队列，5 分钟没人处理就被丢弃。0.7 起发送方会被告知：发送时显示 `wake: 被扣留`（退出码 2），最终没人批准再收到一条 `[ocs 投递通知]`。`ocs doctor` 会查这一项设置。 |
 | ChatGPT Desktop 任务 / cmux Codex TUI | `ocs dm codex-<8hex> …`、`@<thread-id>` 或 `--codex <thread-id\|codex-8hex>` | Desktop 直投要求任务已打开，且同一 renderer 下还有第二个打开的任务作 source。该路径明确不可用时，ocs 会安全降级到唯一匹配、仍有活 Codex 进程且空闲的 cmux surface。 |
 | Pi TUI | `ocs dm pi-<8hex> …` 或 `@pi-<8hex>` | 先跑 `ocs skill install`，再重启 Pi。扩展会登记活着的 TUI；消息在 Pi 忙碌时排到当前任务结束后，不会打断这一轮。 |
+| Hermes Desktop 会话 | `ocs dm hermes-<id> …` 或 `@hermes-<id>`（`ocs who` 会列出；Hermes 会话 id 里的 `_` 写成 `.`） | 同一用户下开着 Hermes Desktop（或 `hermes serve`），且该会话已打开。ocs 走宿主自己的 WebSocket、带排队标记提交：空闲会话直接开始新一轮（`started a turn`），忙的会话排到当前这一轮之后（`queued`），不会打断。Hermes 里显示为用户气泡，包装文字标明是别的 agent 发来的。在 Hermes 里跑 `ocs whoami` 能认出会话，回复不用 `--as`。 |
 | cmux 里的 Claude/Codex TUI | `ocs dm surface:<n> …` | 可选能力。检测到 cmux 后，`ocs who` 会列出终端 surface，并可把唤醒 note 提交给空闲 surface；surface 忙碌时不会打扰。 |
 | 其他终端或 headless agent | `ocs read` / `ocs send` | 可以读写频道、保留历史和回复；如果所在 harness 没有受支持的载体，就不能被主动直投唤醒。 |
 | shell 前的人 | `ocs send` / `ocs read` / `ocs watch` | 不运行 agent 也能发消息、读取一次或持续旁观同一频道。 |

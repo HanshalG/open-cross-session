@@ -33,6 +33,7 @@ import {
 } from "./codex-ipc.ts";
 import { codexSessionsRoot, isCodexThreadId, listCodexSessions } from "./codex-sessions.ts";
 import { messages } from "./i18n.ts";
+import { hermesSessionKeyFromTarget } from "./hermes.ts";
 import { piSessionIdFromTarget } from "./pi-sessions.ts";
 
 /** 正文 UTF-8 字节数在此以内逐字内联（协议 §1）。 */
@@ -183,16 +184,19 @@ export function splitWakeMentions(mentions: readonly string[]): {
   claudeNames: string[];
   codexThreads: string[];
   piTargets: string[];
+  hermesTargets: string[];
 } {
   const claudeNames: string[] = [];
   const codexThreads: string[] = [];
   const piTargets: string[] = [];
+  const hermesTargets: string[] = [];
   for (const mention of mentions) {
     if (isCodexThreadId(mention)) codexThreads.push(mention);
     else if (piSessionIdFromTarget(mention) !== null) piTargets.push(mention);
+    else if (hermesSessionKeyFromTarget(mention) !== null) hermesTargets.push(mention);
     else claudeNames.push(mention);
   }
-  return { claudeNames, codexThreads, piTargets };
+  return { claudeNames, codexThreads, piTargets, hermesTargets };
 }
 
 /**
