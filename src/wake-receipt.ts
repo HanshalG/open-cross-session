@@ -9,7 +9,7 @@
 // - helper 一旦派出，帧由它写，CLI **绝不**再自己写一遍——等不到结果就是 unknown（退出码 3）。
 // - 只有「根本没派出 helper」（Windows、OCS_NO_RECEIPTS、spawn 失败）才在本进程走旧的无回执路径。
 
-import { spawn } from "node:child_process";
+import { spawnDetached } from "./detach.ts";
 import { randomUUID } from "node:crypto";
 import { lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -274,13 +274,12 @@ export async function wakeClaudeTracked(
     sender: options.sender,
     lang: input.lang ?? "en",
   };
-  let child: ReturnType<typeof spawn>;
+  let child: ReturnType<typeof spawnDetached>;
   try {
     sweepWakeJobs(env);
     saveWakeJob(job, env);
     const [cmd, ...args] = command;
-    child = spawn(cmd!, [...args, WAKE_HELPER_COMMAND, job.id], {
-      detached: true,
+    child = spawnDetached(cmd!, [...args, WAKE_HELPER_COMMAND, job.id], {
       stdio: ["ignore", "pipe", "ignore"],
       env: { ...env },
     });

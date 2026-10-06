@@ -9,7 +9,7 @@
 // 订阅记录落在 `$OCS_HOME/idle-subs/<id>.json`：`ocs who` 据此列出待触发项，同一
 // （目标, 订阅方）对上重复订阅去重。
 
-import { spawn } from "node:child_process";
+import { spawnDetached } from "./detach.ts";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -214,8 +214,7 @@ export function selfCommand(): string[] {
 /** 派出脱离终端的 watcher 进程并把 pid 记进订阅。 */
 export function spawnIdleWatcher(sub: IdleSubscription, env: NodeJS.ProcessEnv = process.env): IdleSubscription {
   const [cmd, ...args] = selfCommand();
-  const child = spawn(cmd!, [...args, IDLE_WATCH_COMMAND, sub.id], {
-    detached: true,
+  const child = spawnDetached(cmd!, [...args, IDLE_WATCH_COMMAND, sub.id], {
     stdio: "ignore",
     env: { ...env },
   });

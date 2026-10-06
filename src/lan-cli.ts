@@ -1,7 +1,8 @@
 // `ocs lan …`、`ocs dm <地址>@<对端>`、`ocs who --lan` 的命令实现。
 // cli.ts 只负责参数解析和分派；这里的输出一律走 i18n-lan 目录。
 
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
+import { spawnDetached } from "./detach.ts";
 import { readFileSync } from "node:fs";
 import type { Lang } from "./i18n.ts";
 import { lanMessages } from "./i18n-lan.ts";
@@ -105,7 +106,7 @@ async function lanUp(ctx: LanCliContext): Promise<void> {
   const env: NodeJS.ProcessEnv = { ...process.env };
   for (const key of LAN_DAEMON_ENV_STRIP) delete env[key];
   const [cmd, ...args] = ctx.selfCommand;
-  const child = spawn(cmd!, [...args, LAN_DAEMON_COMMAND], { detached: true, stdio: "ignore", env, windowsHide: true });
+  const child = spawnDetached(cmd!, [...args, LAN_DAEMON_COMMAND], { stdio: "ignore", env, windowsHide: true });
   child.unref();
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {

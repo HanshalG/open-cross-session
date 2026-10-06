@@ -8,7 +8,8 @@
 // 网络和 installer 都留了环境变量注入口，测试用本地假服务器和假脚本跑通全路径，
 // 绝不在测试里碰真 GitHub。doctor 的检查用 OCS_UPGRADE_CHECK=0 可整体关掉，
 // 离线/CI 环境不受影响。
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
+import { spawnDetached } from "./detach.ts";
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -238,7 +239,7 @@ export function maybeUpdateNotice(
     // 先占位写 checked_at：同一天里并发的几十次调用只会派出一个查询进程。
     writeUpdateCache(env, now, cache?.latest ?? null);
     const [cmd, ...args] = selfCommand;
-    const child = spawn(cmd!, [...args, UPDATE_CHECK_COMMAND], { detached: true, stdio: "ignore", env, windowsHide: true });
+    const child = spawnDetached(cmd!, [...args, UPDATE_CHECK_COMMAND], { stdio: "ignore", env, windowsHide: true });
     child.unref();
   } catch {
     // 查不了就算了：约定要求静默
