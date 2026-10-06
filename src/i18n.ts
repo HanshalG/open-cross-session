@@ -31,7 +31,20 @@ interface Catalog {
   deliveryNotice: (n: { seq: number; target: string; channel: string; status: string; reason: string }) => string;
   readDelivery: (target: string, status: string) => string;
   /** 唤醒 note 首行（docs/wake-protocol.md §1）。sender=null 是骨架超预算时的降级档。 */
-  wakeNoteHeader: (h: { sender: string | null; channel: string; seq: number; replyTo?: number; ago?: string }) => string;
+  wakeNoteHeader: (h: {
+    sender: string | null;
+    channel: string;
+    seq: number;
+    replyTo?: number;
+    ago?: string;
+    /** 合并唤醒（§1.1）：这条之前还有几条未读、从哪个 seq 起。 */
+    earlier?: { count: number; firstSeq: number };
+  }) => string;
+  /** Codex 正忙，插进当前回合（§1.1）。 */
+  codexSteered: (thread: string, turnId: string) => string;
+  codexSteerSkipped: (thread: string, reason: string, detail: string) => string;
+  /** Codex 正忙，唤醒并入积压（§1.1）。 */
+  codexWakeDeferred: (thread: string, pending: number) => string;
   wakeNoteReply: (command: string) => string;
   wakeNoteThread: (command: string) => string;
   /** 空闲通知三条文案（docs/wake-protocol.md §2，逐字）。 */
@@ -279,9 +292,12 @@ Data directory: ~/.ocs (override with OCS_HOME). Language: OCS_LANG=en|zh.`,
     `The message is still in the channel log; ${target} will see it on \`ocs inbox\` / \`ocs read ${channel}\`. Do not resend.\n` +
     `Fix on the receiving side: \`ocs doctor --fix\` (sets "crossSessionInbound": "accept" in ~/.claude/settings.json). A repo-level setting can still force hold.`,
   readDelivery: (target, status) => `[wake → ${target}: ${status}]`,
-  wakeNoteHeader: ({ sender, channel, seq, replyTo, ago }) => {
+  wakeNoteHeader: ({ sender, channel, seq, replyTo, ago, earlier }) => {
     const parts = [`seq ${seq}`];
     if (replyTo !== undefined) parts.push(`reply to seq ${replyTo}`);
+    if (earlier !== undefined) {
+      parts.push(`plus ${earlier.count} earlier unread from seq ${earlier.firstSeq} — read the thread first`);
+    }
     if (ago !== undefined) parts.push(ago);
     return sender === null
       ? `[ocs wake] New mention in #${channel} (${parts.join(", ")})`
@@ -317,6 +333,13 @@ Data directory: ~/.ocs (override with OCS_HOME). Language: OCS_LANG=en|zh.`,
     `${messageId === null ? "" : `, message ${messageId}`}) — queued, not confirmed read`,
   codexQueueSkipped: (thread, reason, detail) =>
     `wake(codex): \`codex queue\` skipped for ${thread} (${reason})${detail ? `: ${detail}` : ""}; trying Desktop IPC`,
+  codexSteered: (thread, turnId) =>
+    `wake(codex): inserted into the running turn of task ${thread} (turn ${turnId}) — seen this turn, no extra turn later`,
+  codexSteerSkipped: (thread, reason, detail) =>
+    `wake(codex): could not insert into the running turn of ${thread} (${reason})${detail ? `: ${detail}` : ""}`,
+  codexWakeDeferred: (thread, pending) =>
+    `wake(codex): task ${thread} is mid-turn — message stored, wake deferred ` +
+    `(${pending} pending; one combined wake when the turn ends, skipped if already read)`,
   codexWakeSelfSkipped: (thread) =>
     `wake(codex): skipped self-wake for ${thread} (message is stored; you are already reading it)`,
   piWakeAccepted: (target) => `wake(pi): queued → ${target}`,
@@ -593,9 +616,10 @@ ${lanMessages("zh").help}
     `消息还在频道日志里，${target} 跑 \`ocs inbox\` / \`ocs read ${channel}\` 能看到。请勿重发。\n` +
     `根治：在接收端跑 \`ocs doctor --fix\`（把 ~/.claude/settings.json 的 "crossSessionInbound" 设为 "accept"）。仓库级设置仍可能强制 hold。`,
   readDelivery: (target, status) => `[唤醒 → ${target}: ${status}]`,
-  wakeNoteHeader: ({ sender, channel, seq, replyTo, ago }) => {
+  wakeNoteHeader: ({ sender, channel, seq, replyTo, ago, earlier }) => {
     const parts = [`seq ${seq}`];
     if (replyTo !== undefined) parts.push(`回复 seq ${replyTo}`);
+    if (earlier !== undefined) parts.push(`前面还有 ${earlier.count} 条未读（从 seq ${earlier.firstSeq} 起），先读线程`);
     if (ago !== undefined) parts.push(ago);
     return sender === null
       ? `[ocs 唤醒] #${channel} 提到了你（${parts.join("，")}）`
@@ -626,6 +650,13 @@ ${lanMessages("zh").help}
     `${messageId === null ? "" : `，message ${messageId}`}）——已入队，未确认读取`,
   codexQueueSkipped: (thread, reason, detail) =>
     `wake(codex): ${thread} 跳过 \`codex queue\`（${reason}）${detail ? `: ${detail}` : ""}；改试 Desktop IPC`,
+  codexSteered: (thread, turnId) =>
+    `wake(codex): 已插进 task ${thread} 正在跑的回合（turn ${turnId}）——这一轮就能看到，之后不会再补一轮`,
+  codexSteerSkipped: (thread, reason, detail) =>
+    `wake(codex): 没能插进 ${thread} 正在跑的回合（${reason}）${detail ? `：${detail}` : ""}`,
+  codexWakeDeferred: (thread, pending) =>
+    `wake(codex): task ${thread} 正在跑回合——消息已落盘，唤醒延后` +
+    `（积压 ${pending} 条；回合结束后合成一条唤醒，已读的不再发）`,
   codexWakeSelfSkipped: (thread) =>
     `wake(codex): 跳过自我唤醒 ${thread}（消息已落盘；你本来就在读它）`,
   piWakeAccepted: (target) => `wake(pi): 已排队 → ${target}`,

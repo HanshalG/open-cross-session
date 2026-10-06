@@ -85,6 +85,31 @@ ocs 侧补充：`ocs send --reply-to <N>` 会**隐含唤醒 seq N 的作者**（
 Pi 地址固定为 `pi-<session UUID>`，频道身份使用独立的 `pi:<session UUID>` 命名空间。
 socket 写出但没收到确认时按「结果未知」处理，不自动重发。
 
+### 1.1 Codex 回合进行中（ocs v0.7.4，#41）
+
+Codex 宿主在目标正跑回合时不会丢弃 `codex queue` / Desktop start-turn 的输入，而是排进线程的
+待发队列，回合结束后**每条单独开一个新回合**。连发 N 条就是任务结束后 N 个回合逐条补放旧消息。
+所以 ocs 在入队前先看目标是否在回合中（rollout 最后一个生命周期事件是 `task_started`，取其 `turn_id`）：
+
+1. **插入当前回合**（首选）：非 Desktop 托管的线程，连 `$CODEX_HOME/app-server-control/app-server-control.sock`
+   （守护进程，WebSocket 上的 app-server JSON-RPC），`initialize` 后发
+   `turn/steer {threadId, expectedTurnId: <turn_id>, input: [{type:"text", text:<note>}]}`。note 与 §1 相同。
+   宿主拒绝（回合已换等）= 明确没插进去，走下一步；帧发出后无应答 = 结果未知，停止，不重放。
+2. **合并积压**（退路）：插不进时消息只落盘，唤醒记进 `$OCS_HOME/codex-wakes/<thread>.<channel>.json`，
+   每对（接收方, 频道）一个脱离终端的等待器。回合结束时取出这一批，筛掉接收方读游标已覆盖的 seq，
+   剩下的合成**一条**唤醒走 §1 原有载体；全部读过就不发。积压超过 6 小时不再等，照样投一条。
+   合并唤醒正文是最新一条，首行在 `reply to` 之后、`<ago>` 之前加：
+
+   ```
+   plus <K> earlier unread from seq <F> — read the thread first
+   前面还有 <K> 条未读（从 seq <F> 起），先读线程
+   ```
+
+   这一段与 `Reply:` / `Thread:` 一样不进降级阶梯。`<ago>` 按消息落盘时间算，延迟一眼可见。
+
+`--peek` 不推进游标，所以 peek 过的消息仍会被合并唤醒提醒——读取不等于处理，宁可多提醒一次也不吞消息。
+空闲目标的投递和 0.7.3 完全一样。
+
 ocs 的 Claude DM 频道使用稳定工作区身份派生。Git 仓库按规范化远程地址归一，非 Git 目录按
 启动路径归一；原始值只进本机 `workspace-key` 的 HMAC，频道名不携带路径或远程地址。同一工作区多会话或
 别名冲突时不共用频道，改用会话级身份。v0.3.4 之前的旧历史用

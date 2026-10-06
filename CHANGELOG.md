@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.4
+
+**A busy Codex session no longer gets one extra turn per message after it finishes (#41).** When a Codex task was mid-turn, every wake went into the host's pending queue, and after the turn ended Codex started a separate turn for each one, replaying old messages the agent had already read (12 → 129 in the report). ocs now checks whether the target is mid-turn before sending anything.
+
+- 终端里的 Codex（TUI，托管在 Codex app-server 守护进程里）：消息直接**插进正在跑的这一轮**（守护进程 `turn/steer`，和你在 TUI 里边跑边打字是同一个入口），agent 当场就看得到，结束后不会再补一轮。输出 `wake(codex): inserted into the running turn …`
+- 插不进时（ChatGPT Desktop 托管的 task、没有守护进程、宿主拒绝）：消息照常落盘，唤醒先攒着，这一轮结束后只发**一条**，正文是最新那条，首行写明前面还有几条未读、从哪个 seq 起，以及消息是多久之前发的；对方在这一轮里已经 `ocs read` 读过的不再提醒。输出 `wake(codex): task … is mid-turn — message stored, wake deferred …`
+- 目标空闲时行为不变。帧发出后没应答仍然是「结果未知」，不重发
+- 真机验证（macOS，codex-cli 0.160 守护进程 + TUI）：连发 3 条 DM，第 1 条开了一轮，第 2、3 条插进同一轮，agent 一次引用了三条，之后没有多余回合；同样时机用 0.7.3 的 `codex queue`，消息排在 `thread/queue/list` 里、回合结束后另起一轮
+- 未真机验证：Desktop 托管 task 的积压合并路径（只有单元测试）
+
 ## 0.7.3
 
 **Hermes Desktop sessions can be messaged, locally and from paired machines (#40).** `ocs who` lists the sessions open in Hermes Desktop (or `hermes serve`) as `hermes-<id>`, `ocs dm hermes-<id>` / `@hermes-<id>` puts the message into that same conversation, and inside Hermes `ocs whoami` knows which session it is, so the agent replies with the `Reply:` line as-is.

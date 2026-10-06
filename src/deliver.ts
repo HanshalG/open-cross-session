@@ -6,6 +6,8 @@
 // 分支和措辞与原来逐字一致——两个入口共用一份，免得一边修了另一边漂。
 
 import { resolveSessionSocketByPid, type NativeClaudeSession } from "./claude-inject.ts";
+import { codexActiveTurnId, deferCodexWakeIfBusy, loadDeferredCodexWake } from "./codex-defer.ts";
+import { steerCodexTurn } from "./codex-steer.ts";
 import { codexHosts, codexThreadLivePid, psTable, queueCodexThread } from "./codex-queue.ts";
 import type { messages } from "./i18n.ts";
 import { hermesTargetName, wakeHermesSession, type HermesWakeResult } from "./hermes.ts";
@@ -78,6 +80,10 @@ function tryCodexCmuxFallback(
  *   3. cmux 按键注入 —— 最后兜底。
  * unknown-outcome 在任一层都立即停止：帧可能已写出，绝不重放（铁律 5）。
  * 返回 false 表示三层都没投出去，调用方按「仅落盘」处理。
+ *
+ * 目标正在跑回合时不入宿主队列（#41，codex-defer.ts）：宿主会把每条唤醒排着队、回合结束后
+ * 逐条开新回合。改为并入积压，回合结束后合成一条、已读的不发。`defer:false` 是等待器自己
+ * 投合并唤醒时用的——那一条本来就是积压的出口，不能再并回积压里。
  */
 export async function deliverToCodexTask(
   targetThreadId: string,
@@ -86,6 +92,7 @@ export async function deliverToCodexTask(
   sink: DeliverySink,
   sourceThreadId?: string,
   env: NodeJS.ProcessEnv = process.env,
+  options: { defer?: boolean } = {},
 ): Promise<boolean> {
   // 自我唤醒防回环：Claude（findSelfClaudePid）和 Pi（piWakeSelfSkipped）两条路都有，
   // codex 一直缺——以前 Desktop IPC 前置条件多不易触发，`codex queue` 又快又稳之后
@@ -105,6 +112,45 @@ export async function deliverToCodexTask(
   //     "Message from X" 包装是同一个理由），所以 Desktop 上不拿来源换便利。
   //   * 其它宿主（终端 TUI）—— IPC 根本够不着，queue 是唯一的路。
   const desktopHosted = livePid !== null && codexHosts([livePid], env, ps).get(livePid)?.app === "ChatGPT";
+  // 目标正在跑回合（#41）：宿主会把排队的唤醒留到回合结束后逐条开新回合。先试着插进当前
+  // 回合（守护进程 turn/steer，终端 TUI 实测可用）；插不进就并入积压，回合结束后合成一条。
+  // Desktop 托管的不 steer：守护进程的 steer 留下的是普通用户消息，丢了 IPC 的原生来源信封（铁律 10）。
+  if (livePid !== null && options.defer !== false && wakeInput.rawNote === undefined) {
+    const activeTurn = codexActiveTurnId(targetThreadId, env);
+    const backlog = loadDeferredCodexWake(targetThreadId, wakeInput.channel, env) !== null;
+    if (activeTurn !== null && activeTurn !== "" && !backlog && !desktopHosted) {
+      const steered = await steerCodexTurn({
+        threadId: targetThreadId,
+        expectedTurnId: activeTurn,
+        prompt: wakeNote({
+          ...wakeInput,
+          receiver: `codex-${targetThreadId.slice(0, 8)}`,
+          implicitReceiver: true,
+        }),
+        env,
+      });
+      if (steered.ok) {
+        sink.log(M.codexSteered(targetThreadId, steered.turnId));
+        return true;
+      }
+      if (steered.reason === "unknown-outcome") {
+        sink.log(M.codexUnknownOutcome(steered.detail ?? ""));
+        sink.fail("unknown");
+        return true; // 帧可能已经插进回合，绝不重放
+      }
+      sink.log(M.codexSteerSkipped(targetThreadId, steered.reason, steered.detail ?? ""));
+    }
+    const deferred = deferCodexWakeIfBusy({
+      threadId: targetThreadId,
+      wakeInput,
+      ...(sourceThreadId !== undefined ? { sourceThreadId } : {}),
+      env,
+    });
+    if (deferred.deferred) {
+      sink.log(M.codexWakeDeferred(targetThreadId, deferred.pending));
+      return true;
+    }
+  }
   if (livePid !== null && !desktopHosted) {
     const queued = queueCodexThread({
       threadId: targetThreadId,

@@ -107,6 +107,12 @@ ocs dm <address>@<peer> "<text>" # message + wake an agent on a paired machine
   If no rung delivers, the message remains stored and appears in that task's
   `ocs inbox`; opening/selecting its Desktop task enables direct wake. ocs never
   falls back after an unknown outcome or when a cmux surface match is ambiguous.
+- If the Codex target is mid-turn, ocs does not queue (each queued wake would
+  become its own turn after this one ends): it inserts the wake into the running
+  turn (`inserted into the running turn`), or, when that is not possible, stores
+  the message and sends one combined wake when the turn ends, skipping anything
+  the receiver already read (`wake deferred`). A combined wake's first line says
+  how many earlier messages are unread — read the thread before acting on it.
 - To keep a conversation going, end your message with the peer's @name so they wake
   (you are never woken by your own @).
 - Replying with `ocs dm <workspace-alias>` reuses the stable or explicitly

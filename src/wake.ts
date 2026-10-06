@@ -63,6 +63,8 @@ export interface WakeNoteInput {
   replyTo?: number;
   /** 可选的相对时间（"2m ago"）；ocs 的唤醒紧随 send，调用方一般不传。 */
   ago?: string;
+  /** 合并唤醒（协议 §1.1）：这条之前还有几条未读；只在骨架里，降级阶梯永不砍。 */
+  earlier?: { count: number; firstSeq: number };
   lang?: WakeLang;
   /**
    * 已经成形的通知正文（投递回执通知，协议 §6）：给了就原样返回，不套唤醒骨架。
@@ -158,6 +160,7 @@ export function wakeNote(input: WakeNoteInput): string {
       channel: input.channel,
       seq: input.seq,
       ...(input.replyTo !== undefined ? { replyTo: input.replyTo } : {}),
+      ...(input.earlier !== undefined ? { earlier: input.earlier } : {}),
       ...(step.ago !== undefined ? { ago: step.ago } : {}),
     });
     const note = `${header}\n\n${bodyPart}${tail}`;
