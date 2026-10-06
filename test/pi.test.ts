@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,8 +7,10 @@ import {
   installPiIntegration,
   PI_EXTENSION_SOURCE,
 } from "../src/pi-extension.ts";
+import { createHash } from "node:crypto";
 import {
   listPiSessions,
+  piInboxPathValid,
   piSessionIdFromTarget,
   piTargetName,
   wakePiSession,
@@ -102,6 +104,21 @@ describe("Pi registration and wake transport", () => {
     });
   });
 
+  test("Windows registrations must point at this session's own unguessable local pipe", () => {
+    const key = createHash("sha256").update(SESSION_ID).digest("hex").slice(0, 24);
+    const pipe = `\\\\.\\pipe\\ocs-pi-${key}-4242-${"ab".repeat(16)}`;
+    expect(pipe.startsWith("\\\\.\\pipe\\")).toBe(true);
+    expect(piInboxPathValid(pipe, SESSION_ID, 4242, {}, "win32")).toBe(true);
+    expect(piInboxPathValid(pipe, SESSION_ID, 4243, {}, "win32")).toBe(false);
+    expect(piInboxPathValid(pipe, "22222222-2222-4333-8444-555555555555", 4242, {}, "win32")).toBe(false);
+    expect(piInboxPathValid(pipe.replace("\\\\.", "\\\\fileserver"), SESSION_ID, 4242, {}, "win32")).toBe(false);
+    expect(piInboxPathValid(`\\\\.\\pipe\\ocs-pi-${key}-4242`, SESSION_ID, 4242, {}, "win32")).toBe(false);
+    expect(piInboxPathValid("C:\\Users\\x\\.ocs\\pi-inbox\\pi.sock", SESSION_ID, 4242, {}, "win32")).toBe(false);
+    // and the Unix rule is unchanged: a pipe name is not an inbox path there
+    expect(piInboxPathValid(pipe, SESSION_ID, 4242, { OCS_HOME: "/h" }, "darwin")).toBe(false);
+    expect(piInboxPathValid("/h/pi-inbox/pi-x.sock", SESSION_ID, 4242, { OCS_HOME: "/h" }, "darwin")).toBe(true);
+  });
+
   test("Pi address has a separate identity namespace and is routed out of Claude mentions", async () => {
     const target = piTargetName(SESSION_ID);
     expect(piSessionIdFromTarget(target)).toBe(SESSION_ID);
@@ -176,6 +193,48 @@ describe("installed Pi extension", () => {
       expect(output.notices).toEqual([]);
       expect(listPiSessions({ OCS_HOME: home })).toEqual([]);
     } finally {
+      if (host.exitCode === null) host.kill();
+    }
+  });
+});
+
+describe("installed Pi extension on Windows", () => {
+  test("listens on a named pipe instead of a .sock file and is discoverable and wakeable", async () => {
+    const root = mkdtempSync("/tmp/ocs-pi-win-");
+    tempRoots.push(root);
+    const home = join(root, "ocs-home");
+    const paths = installPiIntegration("---\nname: ocs\n---\n", { PI_CODING_AGENT_DIR: join(root, "pi-agent") }, root);
+    const host = Bun.spawn(
+      [process.execPath, join(import.meta.dir, "fixtures", "pi-extension-host.ts"), paths.extensionPath, SESSION_ID, "win32"],
+      { cwd: root, env: { ...process.env, OCS_HOME: home }, stdout: "pipe", stderr: "pipe" },
+    );
+    const previousCwd = process.cwd();
+    try {
+      let registration: PiSessionRegistration | undefined;
+      const deadline = Date.now() + 3_000;
+      while (registration === undefined && Date.now() < deadline) {
+        [registration] = listPiSessions({ OCS_HOME: home }, "win32");
+        if (registration === undefined) await Bun.sleep(10);
+      }
+      expect(registration?.socket_path).toMatch(/^\\\\\.\\pipe\\ocs-pi-[0-9a-f]{24}-\d+-[0-9a-f]{32}$/);
+      expect(registration?.pid).toBe(host.pid);
+      // nothing was bound under pi-inbox: that is the path Windows refused with EACCES
+      expect(readdirSync(join(home, "pi-inbox"))).toEqual([]);
+      // the Unix reader keeps refusing an inbox outside ~/.ocs/pi-inbox
+      expect(listPiSessions({ OCS_HOME: home }, "darwin")).toEqual([]);
+      process.chdir(root); // on this runner the "pipe" is a relative socket under the host's cwd
+      const result = await wakePiSession(registration!, "[ocs wake] from windows");
+      process.chdir(previousCwd);
+      expect(result).toEqual({ ok: true, sessionId: SESSION_ID, delivery: "queued" });
+      const [stdout, stderr] = await Promise.all([new Response(host.stdout).text(), new Response(host.stderr).text()]);
+      await host.exited;
+      expect(stderr).toBe("");
+      const output = JSON.parse(stdout) as { sent: Array<{ message: Record<string, unknown> }>; notices: string[] };
+      expect(output.notices).toEqual([]);
+      expect(output.sent.map((entry) => entry.message.details)).toEqual([{ transport: "local-pipe" }]);
+      expect(listPiSessions({ OCS_HOME: home }, "win32")).toEqual([]);
+    } finally {
+      process.chdir(previousCwd);
       if (host.exitCode === null) host.kill();
     }
   });

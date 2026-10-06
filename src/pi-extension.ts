@@ -20,6 +20,12 @@ import { isAbsolute, join } from "node:path";
 const OCS_PI_EXTENSION_VERSION = 1;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_FRAME_BYTES = 16 * 1024;
+// Native Windows Node cannot listen on a filesystem .sock path (EACCES); local IPC there is a
+// named pipe. The name carries 128 random bits so nobody can create it first, libuv opens the
+// first instance exclusively, and the default pipe DACL keeps other accounts from adding
+// instances. The per-runtime token still authenticates every frame.
+const WINDOWS = process.platform === "win32";
+const BS = "\\\\";
 let runtime = null;
 
 function ocsHome() {
@@ -80,7 +86,7 @@ async function stop() {
   removeRegistration(current);
   for (const socket of current.sockets) socket.destroy();
   await new Promise((resolve) => current.server.close(() => resolve()));
-  try { unlinkSync(current.socketPath); } catch {}
+  if (!WINDOWS) try { unlinkSync(current.socketPath); } catch {}
 }
 
 function reply(socket, value) {
@@ -100,14 +106,18 @@ async function start(pi, ctx) {
   chmodSync(sessionsDir, 0o700);
   chmodSync(inboxDir, 0o700);
   const socketKey = createHash("sha256").update(sessionId).digest("hex").slice(0, 24);
-  const socketPath = join(inboxDir, "pi-" + socketKey + "-" + process.pid + ".sock");
+  const socketPath = WINDOWS
+    ? BS + BS + "." + BS + "pipe" + BS + "ocs-pi-" + socketKey + "-" + process.pid + "-" + randomBytes(16).toString("hex")
+    : join(inboxDir, "pi-" + socketKey + "-" + process.pid + ".sock");
   const registryPath = join(sessionsDir, sessionId + "." + process.pid + ".json");
-  try {
-    const stale = lstatSync(socketPath);
-    if (stale.isSocket() && !stale.isSymbolicLink()) unlinkSync(socketPath);
-    else throw new Error("refusing to replace non-socket Pi inbox path: " + socketPath);
-  } catch (error) {
-    if (error && error.code !== "ENOENT") throw error;
+  if (!WINDOWS) {
+    try {
+      const stale = lstatSync(socketPath);
+      if (stale.isSocket() && !stale.isSymbolicLink()) unlinkSync(socketPath);
+      else throw new Error("refusing to replace non-socket Pi inbox path: " + socketPath);
+    } catch (error) {
+      if (error && error.code !== "ENOENT") throw error;
+    }
   }
   const current = {
     server: null,
@@ -163,7 +173,7 @@ async function start(pi, ctx) {
             customType: "ocs",
             content: frame.note,
             display: true,
-            details: { transport: "local-uds" },
+            details: { transport: WINDOWS ? "local-pipe" : "local-uds" },
           },
           { deliverAs: "followUp", triggerTurn: true },
         );
@@ -183,7 +193,7 @@ async function start(pi, ctx) {
     });
   });
   server.on("error", (error) => ctx.ui.notify("ocs Pi inbox error: " + String(error), "warning"));
-  chmodSync(socketPath, 0o600);
+  if (!WINDOWS) chmodSync(socketPath, 0o600);
   runtime = current;
   try {
     writeRegistration(current);

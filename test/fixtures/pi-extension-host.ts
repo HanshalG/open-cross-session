@@ -3,8 +3,11 @@
 
 export {};
 
-const [extensionPath, sessionId] = process.argv.slice(2);
+const [extensionPath, sessionId, fakePlatform] = process.argv.slice(2);
 if (extensionPath === undefined || sessionId === undefined) process.exit(2);
+// Exercise the Windows named-pipe branch on a Unix runner: the pipe name then becomes a
+// relative Unix socket path under this process's cwd, which the test points at a temp dir.
+if (fakePlatform !== undefined) Object.defineProperty(process, "platform", { value: fakePlatform });
 
 const handlers = new Map<string, (event: unknown, ctx: typeof context) => unknown>();
 const sent: Array<{ message: Record<string, unknown>; options: Record<string, unknown> }> = [];

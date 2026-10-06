@@ -2,10 +2,14 @@
 //
 // A small Pi extension (installed by `ocs skill install`) owns one Unix socket per
 // live TUI session and publishes a 0600 registration under ~/.ocs/pi-sessions.
+// Native Windows has no filesystem sockets for Node, so there the inbox is a named pipe
+// `\\.\pipe\ocs-pi-<sha256(session)[:24]>-<pid>-<128 random bits>`: unguessable, so it cannot
+// be created first by someone else; mode bits mean nothing there (the profile ACL guards ~/.ocs).
 // The random per-runtime token prevents a stale/reused pid or forged socket from
 // accepting a wake intended for another session. A successful response means the
 // Pi runtime accepted the custom message; it does not claim the model read it.
 
+import { createHash } from "node:crypto";
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { connect } from "node:net";
 import { isAbsolute, join, resolve, sep } from "node:path";
@@ -18,6 +22,24 @@ export const PI_WAKE_MAX_BYTES = 16 * 1024;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const REGISTRATION_RE = /^([0-9a-f-]{36})\.(\d+)\.json$/i;
 const TOKEN_RE = /^[0-9a-f]{64}$/;
+const WINDOWS_PIPE_RE = /^\\\\\.\\pipe\\ocs-pi-([0-9a-f]{24})-(\d+)-[0-9a-f]{32}$/;
+
+/** Where a registration may point its inbox: under ~/.ocs/pi-inbox (Unix) or our own pipe name (Windows). */
+export function piInboxPathValid(
+  socketPath: string,
+  sessionId: string,
+  pid: number,
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  if (platform === "win32") {
+    const match = WINDOWS_PIPE_RE.exec(socketPath);
+    return match !== null &&
+      match[1] === createHash("sha256").update(sessionId).digest("hex").slice(0, 24) &&
+      Number(match[2]) === pid;
+  }
+  return isAbsolute(socketPath) && within(join(ocsHome(env), "pi-inbox"), socketPath);
+}
 
 export function isPiSessionId(value: string): boolean {
   return UUID_RE.test(value);
@@ -81,6 +103,7 @@ function readRegistration(
   dir: string,
   filename: string,
   env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
 ): PiSessionRegistration | null {
   const match = REGISTRATION_RE.exec(filename);
   if (match === null) return null;
@@ -91,7 +114,7 @@ function readRegistration(
       !stat.isFile() ||
       stat.isSymbolicLink() ||
       stat.size > 16 * 1024 ||
-      (stat.mode & 0o077) !== 0 ||
+      (platform !== "win32" && (stat.mode & 0o077) !== 0) ||
       (typeof process.getuid === "function" && stat.uid !== process.getuid())
     ) return null;
     const value = JSON.parse(readFileSync(path, "utf8")) as unknown;
@@ -119,14 +142,14 @@ function readRegistration(
       typeof record.cwd !== "string" ||
       !isAbsolute(record.cwd) ||
       typeof socketPath !== "string" ||
-      !isAbsolute(socketPath) ||
-      !within(join(ocsHome(env), "pi-inbox"), socketPath) ||
+      !piInboxPathValid(socketPath, sessionId, pid, env, platform) ||
       typeof record.token !== "string" ||
       !TOKEN_RE.test(record.token) ||
       typeof record.registered_at !== "string" ||
       !Number.isFinite(Date.parse(record.registered_at))
     ) return null;
     if (!pidAlive(pid)) return null;
+    if (platform === "win32") return { ...(record as unknown as PiSessionRegistration), session_id: sessionId };
     const socketStat = lstatSync(socketPath);
     if (
       !socketStat.isSocket() ||
@@ -144,7 +167,10 @@ export function piSessionsRoot(env: NodeJS.ProcessEnv = process.env): string {
   return join(ocsHome(env), "pi-sessions");
 }
 
-export function listPiSessions(env: NodeJS.ProcessEnv = process.env): PiSessionRegistration[] {
+export function listPiSessions(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): PiSessionRegistration[] {
   const dir = piSessionsRoot(env);
   let files: string[];
   try {
@@ -153,7 +179,7 @@ export function listPiSessions(env: NodeJS.ProcessEnv = process.env): PiSessionR
     return [];
   }
   const sessions = files
-    .map((file) => readRegistration(dir, file, env))
+    .map((file) => readRegistration(dir, file, env, platform))
     .filter((session): session is PiSessionRegistration => session !== null);
   sessions.sort((a, b) => Date.parse(b.registered_at) - Date.parse(a.registered_at) || a.pid - b.pid);
   return sessions;

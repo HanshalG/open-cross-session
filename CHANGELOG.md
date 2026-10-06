@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.2
+
+**Windows: native Pi TUI sessions can receive messages (#39).** The Pi extension listened on a `.sock` file under `~/.ocs/pi-inbox`, which native Windows Node refuses with `EACCES`, so Windows Pi sessions never showed up in `ocs who` and could not be messaged locally or from a paired machine.
+
+- Windows 上 Pi 扩展改为监听命名管道 `\\.\pipe\ocs-pi-<会话 hash>-<pid>-<128 位随机>`；读注册时只认这个形状、会话 hash 和 pid 都要对上，`\\主机\pipe\…` 一律拒绝。每帧仍校验运行期 token。macOS / Linux 不变
+- Windows 上不再按 mode 位拒收 Pi 注册文件（NTFS 没有这些位，权限靠用户目录 ACL，同 Claude 那边的规则）
+- 升级后跑一次 `ocs skill install`（或 `ocs doctor --fix`）更新 Pi 扩展，再重开 Pi 会话
+
+**Windows: background processes no longer hold the files you redirected `ocs` output to (#38).** libuv creates child processes with handle inheritance on, so `ocs lan up *> out.txt` left the LAN daemon holding `out.txt` until it restarted. ocs now clears the inherit flag on its own stdin/stdout/stderr before starting the LAN daemon, idle watchers, wake helpers and the update check.
+
 ## 0.7.1
 
 **Windows: ocs now checks who is serving ChatGPT Desktop's Codex pipe before sending anything (#37).** 0.6.2–0.7.0 trusted `\\.\pipe\codex-ipc` because a pipe with that name existed. Any local process that created the name first received the wake prompts and thread ids and could answer as the task owner. macOS and Linux were not affected (the socket's owner and mode were already checked).

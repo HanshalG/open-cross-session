@@ -149,6 +149,12 @@ UDP 组播 `239.255.67.83:47891`（不用 mDNS，不和系统 mDNSResponder / av
 - 自身识别：管道名里没有 pid，按 `CLAUDE_CODE_SESSION_ID` + `CLAUDE_CODE_MESSAGING_SOCKET`
   在会话目录里找唯一匹配。Windows 没有 `ps`，祖先链兜底不可用。
 - 文件权限靠 NTFS ACL（用户目录默认私有），不检查 mode 位。
+- Pi 的收件箱（0.7.2 起）：Windows 上 Node 不能在文件路径上 listen（`.sock` 报 EACCES），扩展改为监听
+  `\\.\pipe\ocs-pi-<会话 hash>-<pid>-<128 位随机>`。名字猜不到，别人抢不了先；libuv 独占建第一个实例，
+  默认管道 DACL 不让别的账号加实例；每帧仍校验运行期 token。读注册时只认这个形状、且 pid 与注册一致。
+  装了旧扩展的 Pi 要 `ocs skill install` 后重开会话。
+- 后台进程（守护进程、idle watcher、版本检查）派出前清掉本进程 std 句柄的继承标志（0.7.2 起）：libuv 在
+  Windows 上总是带着可继承句柄建子进程，`ocs lan up *> out.txt` 曾让守护进程一直占着 out.txt（#38）。
 - 防火墙：给 `ocs.exe` 放行入站 TCP 47890、UDP 47891。家里 Wi-Fi 常被识别成「公用」网络，
   这时规则要带上 Public，并用 `-RemoteAddress <本网段>` 收窄范围，不要整体改网络类型。
 - `crossSessionInbound` 默认 hold：远端消息进收件箱后 5 分钟没人点投递就被丢弃。Windows 上没有投递回执
