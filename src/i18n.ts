@@ -428,7 +428,8 @@ Data directory: ~/.ocs (override with OCS_HOME). Language: OCS_LANG=en|zh.`,
   doctorDataUnsafe: (path, mode) =>
     `${path} permissions are ${mode}; other local users may access ocs state — run \`ocs doctor --fix\``,
   doctorDataNotDirectory: (path) => `${path} is not a usable data directory`,
-  upgrade: `Agent Party is no longer maintained, and ocs no longer points to it.
+  upgrade: `Agent Party shuts down on 2026-10-31 and ocs no longer points to it.
+Remove the local Agent Party install: https://github.com/leeguooooo/agentparty/blob/main/docs/uninstall.md
 
 Machines on the same LAN: \`ocs lan up\` + \`ocs lan pair\`, then address agents as <name>@<peer>.
 Machines on different networks: put both on the same virtual LAN (Tailscale, WireGuard,
@@ -740,7 +741,8 @@ ${lanMessages("zh").help}
   doctorDataFixed: (path) => `${path} 已存在且仅当前用户可访问`,
   doctorDataUnsafe: (path, mode) => `${path} 权限是 ${mode}，其他本机用户可能访问 ocs 状态——运行 \`ocs doctor --fix\``,
   doctorDataNotDirectory: (path) => `${path} 不是可用的数据目录`,
-  upgrade: `Agent Party 已停止维护，ocs 不再引导迁移过去。
+  upgrade: `Agent Party 将于 2026-10-31 关停，ocs 不再引导迁移过去。
+卸载本机的 Agent Party：https://github.com/leeguooooo/agentparty/blob/main/docs/uninstall.zh.md
 
 同一局域网的机器：\`ocs lan up\` + \`ocs lan pair\`，之后用 <名字>@<对端> 找对方的 agent。
 不同网络的机器：接入同一个虚拟局域网（Tailscale、WireGuard、ZeroTier 或公司 VPN），

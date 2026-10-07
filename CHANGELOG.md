@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.6
+
+- `ocs upgrade --party`（旧入口）补上 Agent Party 的关停日期（2026-10-31）和卸载本机 Agent Party 的指南链接；仍然只指向 `ocs lan`，不引导迁回 Agent Party
+
 ## 0.7.5
 
 **Agent Party is no longer maintained; ocs stops pointing to it.** Machines on different networks use the same `ocs lan`: put both on one virtual LAN (Tailscale, WireGuard, ZeroTier or a company VPN) and pair with `ocs lan pair <code> --addr <peer-vpn-ip>:47890`.
