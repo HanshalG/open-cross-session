@@ -1,5 +1,7 @@
 # Cross-session wake protocol v2（ocs 与 AgentParty 共用）
 
+> 2026-10：AgentParty 已停止维护，本协议此后只由 ocs 演进；下文里 AgentParty 的部分保留作历史参考。
+
 本文是 [open-cross-session#3](https://github.com/leeguooooo/open-cross-session/issues/3)、
 [#4](https://github.com/leeguooooo/open-cross-session/issues/4)、
 [#5](https://github.com/leeguooooo/open-cross-session/issues/5) 与

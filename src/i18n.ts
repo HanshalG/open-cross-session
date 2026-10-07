@@ -258,9 +258,8 @@ Usage:
       data-directory permissions, and crossSessionInbound (backing up settings first).
   ocs skill install
       Install the ocs skill for Claude, Codex, and Pi, plus Pi's direct-wake extension.
-  ocs upgrade [--check | --party]
-      Upgrade the ocs binary to the latest GitHub Release. --check only reports;
-      --party prints the migration guide to hosted Agent Party (cross-network, cross-org channels).
+  ocs upgrade [--check]
+      Upgrade the ocs binary to the latest GitHub Release. --check only reports.
 ${lanMessages("en").help}
   ocs version | help
 
@@ -429,13 +428,12 @@ Data directory: ~/.ocs (override with OCS_HOME). Language: OCS_LANG=en|zh.`,
   doctorDataUnsafe: (path, mode) =>
     `${path} permissions are ${mode}; other local users may access ocs state — run \`ocs doctor --fix\``,
   doctorDataNotDirectory: (path) => `${path} is not a usable data directory`,
-  upgrade: `From local to hosted Agent Party (cross-network, cross-org channels, same habits):
+  upgrade: `Agent Party is no longer maintained, and ocs no longer points to it.
 
-  1. Install:   curl -fsSL https://agentparty.leeguoo.com/install.sh | sh
-  2. Channel:   create one at https://agentparty.leeguoo.com and grab the party join snippet
-  3. History:   optionally export with \`ocs read <channel> --as migrator --peek --json\` and replay via party send
-
-Local ocs and hosted party coexist fine: your machine and your LAN (\`ocs lan\`) stay on ocs; other networks, teams and orgs go party.`,
+Machines on the same LAN: \`ocs lan up\` + \`ocs lan pair\`, then address agents as <name>@<peer>.
+Machines on different networks: put both on the same virtual LAN (Tailscale, WireGuard,
+ZeroTier or a company VPN) and pair with \`ocs lan pair <code> --addr <peer-vpn-ip>:47890\`.
+Details: https://github.com/leeguooooo/open-cross-session/blob/main/docs/lan.md`,
   upgradeChecking: "checking the latest GitHub Release…",
   upgradeCurrent: (version) => `ocs ${version} is already the latest release`,
   upgradeBehind: (current, latest) => `ocs ${current} is behind the latest release ${latest}`,
@@ -444,7 +442,7 @@ Local ocs and hosted party coexist fine: your machine and your LAN (\`ocs lan\`)
   upgradeRunning: (command) => `running installer: ${command}`,
   upgradeDone: "upgrade complete — run `ocs version` to confirm",
   upgradeFailed: (code) => `installer failed (exit ${code}); the existing binary was left untouched`,
-  upgradePartyHint: "other computers on your LAN: `ocs lan` (see `ocs help`); across networks or orgs: `ocs upgrade --party`",
+  upgradePartyHint: "other computers: `ocs lan` — same LAN, or different networks over a VPN such as Tailscale/WireGuard (see `ocs help`)",
   doctorVersion: "Version",
   doctorVersionOk: (version) => `ocs ${version} is the latest release`,
   doctorVersionBehind: (current, latest) => `ocs ${current} is behind ${latest} — run \`ocs upgrade\``,
@@ -586,9 +584,8 @@ const zh: Catalog = {
       并在备份后把 crossSessionInbound 设为 accept
   ocs skill install
       给 Claude、Codex、Pi 安装 ocs skill，并安装 Pi 直投扩展
-  ocs upgrade [--check | --party]
-      把 ocs 二进制升级到最新 GitHub Release。--check 只报告不安装；
-      --party 打印迁移到托管版 Agent Party（跨网络、跨组织频道）的指南。
+  ocs upgrade [--check]
+      把 ocs 二进制升级到最新 GitHub Release。--check 只报告不安装。
 ${lanMessages("zh").help}
   ocs version | help
 
@@ -743,13 +740,12 @@ ${lanMessages("zh").help}
   doctorDataFixed: (path) => `${path} 已存在且仅当前用户可访问`,
   doctorDataUnsafe: (path, mode) => `${path} 权限是 ${mode}，其他本机用户可能访问 ocs 状态——运行 \`ocs doctor --fix\``,
   doctorDataNotDirectory: (path) => `${path} 不是可用的数据目录`,
-  upgrade: `本地版到托管版 Agent Party（跨网络、跨组织频道，同一套使用习惯）：
+  upgrade: `Agent Party 已停止维护，ocs 不再引导迁移过去。
 
-  1. 安装:  curl -fsSL https://agentparty.leeguoo.com/install.sh | sh
-  2. 建频道: 打开 https://agentparty.leeguoo.com 创建频道，拿到 party join 片段
-  3. 迁历史: ocs read <channel> --as migrator --peek --json 导出后用 party send 回放（可选）
-
-本地 ocs 与托管 party 可以并存：本机和局域网（\`ocs lan\`）走 ocs，跨网络、跨团队、跨组织走 party。`,
+同一局域网的机器：\`ocs lan up\` + \`ocs lan pair\`，之后用 <名字>@<对端> 找对方的 agent。
+不同网络的机器：接入同一个虚拟局域网（Tailscale、WireGuard、ZeroTier 或公司 VPN），
+用 \`ocs lan pair <配对码> --addr <对方VPN地址>:47890\` 配对。
+详见 https://github.com/leeguooooo/open-cross-session/blob/main/docs/lan.md`,
   upgradeChecking: "正在查询 GitHub 最新 Release…",
   upgradeCurrent: (version) => `ocs ${version} 已是最新版本`,
   upgradeBehind: (current, latest) => `ocs ${current} 落后于最新版本 ${latest}`,
@@ -758,7 +754,7 @@ ${lanMessages("zh").help}
   upgradeRunning: (command) => `正在运行安装脚本：${command}`,
   upgradeDone: "升级完成——运行 `ocs version` 确认",
   upgradeFailed: (code) => `安装脚本失败（退出码 ${code}），现有二进制未改动`,
-  upgradePartyHint: "局域网里的其他电脑：`ocs lan`（见 `ocs help`）；跨网络、跨组织：`ocs upgrade --party`",
+  upgradePartyHint: "其他电脑：`ocs lan`——同一局域网，或经 Tailscale/WireGuard 等 VPN 跨网络（见 `ocs help`）",
   doctorVersion: "版本",
   doctorVersionOk: (version) => `ocs ${version} 已是最新版本`,
   doctorVersionBehind: (current, latest) => `ocs ${current} 落后于 ${latest}——运行 \`ocs upgrade\``,

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // ocs — open-cross-session CLI。
 //
-// 命令面刻意贴近上游 party CLI 的使用习惯，降低将来 `ocs upgrade` 迁到托管版的心智成本。
+// 命令面沿用 party CLI 的使用习惯（ocs 从 AgentParty 孵化；AgentParty 已停止维护）。
 // 输出全部走 i18n 目录（英文 canonical，OCS_LANG/locale 选 zh）。
 
 import { chmodSync, mkdirSync, statSync } from "node:fs";
@@ -127,7 +127,7 @@ import {
   upgradeCheckEnabled,
 } from "./upgrade.ts";
 
-export const OCS_VERSION = "0.7.4";
+export const OCS_VERSION = "0.7.5";
 
 const LANG = detectLang();
 const M = messages(LANG);
@@ -1050,7 +1050,8 @@ function cmdCodexSessions(parsed: Parsed): void {
   for (const s of sessions) console.log(formatCodexSessionLine(s));
 }
 
-/** `ocs upgrade`：查最新 release 并复用 install.sh 升级；--check 只报告；--party 打印迁移指南。 */
+/** `ocs upgrade`：查最新 release 并复用 install.sh 升级；--check 只报告。
+ * --party 已从帮助里去掉（AgentParty 停止维护），旧脚本仍可调用：只打印跨机器怎么用 ocs lan。 */
 async function cmdUpgrade(parsed: Parsed): Promise<void> {
   if (parsed.flags.has("party")) {
     console.log(M.upgrade);

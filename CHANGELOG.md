@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.5
+
+**Agent Party is no longer maintained; ocs stops pointing to it.** Machines on different networks use the same `ocs lan`: put both on one virtual LAN (Tailscale, WireGuard, ZeroTier or a company VPN) and pair with `ocs lan pair <code> --addr <peer-vpn-ip>:47890`.
+
+- `ocs upgrade` 之后的提示改为指向 `ocs lan`（同一局域网，或经 VPN 跨网络），不再提 `ocs upgrade --party`
+- `ocs upgrade --party` 从帮助里去掉；旧脚本仍可调用，只打印上面的跨机器用法，不再给 Agent Party 的安装和建频道步骤
+- README 去掉 Agent Party 对比列、「本地版与托管版」一节和跨网络引流，新增「不同网络：虚拟局域网」一节；docs/lan.md 同步
+- 已验证：跨网段（`192.168.0.x` ↔ `192.168.1.x`）只按地址、不靠组播的配对与互发（macOS ↔ Windows）。Tailscale / WireGuard 本身尚未真机验证
+
 ## 0.7.4
 
 **A busy Codex session no longer gets one extra turn per message after it finishes (#41).** When a Codex task was mid-turn, every wake went into the host's pending queue, and after the turn ended Codex started a separate turn for each one, replaying old messages the agent had already read (12 → 129 in the report). ocs now checks whether the target is mid-turn before sending anything.

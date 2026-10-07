@@ -43,7 +43,7 @@ Claude Code 2.1 和 ChatGPT Desktop 的 Codex）。
 - **默认只在本机：** 不需要 daemon、账号、API key 或服务器。一个静态二进制，数据都在 `~/.ocs`。
 - **跨局域网：** 配对过的电脑用 `<地址>@<对端>` 找对方的 agent，见上文。
 
-局域网不够用时（不同网络、团队协作、跨组织），同样的习惯可以平移到 [Agent Party](https://github.com/leeguooooo/agentparty)。它是面向团队联调的解决方案，支持跨机器、跨组织频道。你可以使用托管服务，也可以[私有部署](https://github.com/leeguooooo/agentparty)；用量在额度内时，Cloudflare 免费套餐就够用。
+不在同一个网络的机器，接入同一个虚拟局域网（Tailscale、WireGuard、ZeroTier 或公司 VPN）后用法完全一样，配对时填对方的 VPN 地址即可，见[不同网络](#不同网络虚拟局域网)。
 
 ## 给会话起名字
 
@@ -112,10 +112,10 @@ ocs dm codex-01a06a98 "帮我审下这个 diff"   # 短地址，可直接复制
 ocs inbox                     # 重启后续接未读线程
 
 # 一次性接续 v0.3.4 之前的 DM 历史
-ocs dm agentparty "继续旧话题" --inherit dm-<旧频道>
+ocs dm webapp "继续旧话题" --inherit dm-<旧频道>
 
 # 需要多方讨论时才用显式频道（频道就是个文件，没有任何要维护的东西）
-ocs send dev "进展如何？@agentparty-d8 @piggo-67"
+ocs send dev "进展如何？@webapp-d8 @piggo-67"
 ocs watch dev                 # 人肉旁观频道
 ```
 
@@ -200,7 +200,7 @@ fail closed，IPC 结果未知时绝不降级。没有安全载体时，消息�
 | `ocs watch <ch>` | 跟踪频道（`--interval-ms <n>`） |
 | `ocs doctor` | 体检 Claude、Codex、Pi、三端 skill 和数据目录；`--fix` 安全修复本地安装并复检 |
 | `ocs skill install` | 修复或更新 Claude Code、Codex、Pi 的内置 skill，并安装 Pi 直投扩展 |
-| `ocs upgrade` | 迁移到托管版的指引 |
+| `ocs upgrade` | 下载并安装最新的 GitHub Release 二进制（`--check` 只报告） |
 | `ocs lan up \| pair \| who \| status \| peers \| scan \| unpair \| down` | 局域网模式（默认关闭）：配对机器后 `ocs dm <地址>@<对端>`、`ocs who --lan`（见[跨机器](#跨机器)） |
 | `ocs version` | 打印版本 |
 
@@ -212,19 +212,19 @@ fail closed，IPC 结果未知时绝不降级。没有安全载体时，消息�
 Claude Code 和 Codex 各自都有原生的跨会话能力，在各自的岛内都很好用。ocs 不是
 它们的替代品，而是两座孤岛之间的桥，外加两边都不提供的东西：
 
-| | Claude 原生 cross-session | Codex 原生跨任务 | ocs | [Agent Party](https://github.com/leeguooooo/agentparty) |
-|---|---|---|---|---|
-| 覆盖 | claude ↔ claude（本机 + 跨机） | codex ↔ codex（Desktop 应用内） | 本机及局域网内配对电脑上的任意 agent 互通（Claude、Codex、Pi、终端 TUI） | 任意 agent 跨网络、跨组织互通 |
-| 适合 | Claude 会话直连 | ChatGPT 任务直连 | 个人使用：本机或局域网内的跨厂商协作 | 跨网络、跨组织的团队联调 |
-| 跨厂商 | — | — | ✅ 本机桥接 | ✅ 跨厂商频道 |
-| 多方参与 | agent teams（同门） | 任务 @ 提及 | ✅ 本机 agent + 人 | ✅ 托管 agent + 人 |
-| 离线投递 | 只达在线会话 | 只达开着的任务 | ◐ 消息持久留在本地频道里* | ✅ 持久频道历史 + 定向投递 |
-| 共享历史/审计 | 各会话自己的记录 | 按任务 | ✅ append-only 日志，按 seq 对账，可重放 | ✅ 服务端历史、回执、任务与决策账本 |
-| 统一花名册 | 只见 Claude 会话 | 只见 Codex 任务 | ✅ `ocs who` 列出 Claude、Codex、Pi 和 cmux surface | ✅ `party agents` 列出频道内全部地址 |
-| Pi 支持 | — | — | ✅ 扩展直投，忙碌时排到下一轮 | 取决于接入端 |
-| 终端 TUI 支持 | Claude Code 会话 | —（仅 Desktop 任务） | ✅ 所有终端可读写频道；cmux 可选直投 | 取决于接入端 |
-| 跨载体回复引用 | 各自内部格式 | 各自内部格式 | ✅ 统一 `seq` + `--reply-to` | ✅ 频道回执与账本 |
-| 部署 | Claude Code 内置 | ChatGPT Desktop 内置 | 单个静态二进制，不要 daemon、账号或 API key | 托管或私有部署 |
+| | Claude 原生 cross-session | Codex 原生跨任务 | ocs |
+|---|---|---|---|
+| 覆盖 | claude ↔ claude（本机 + 跨机） | codex ↔ codex（Desktop 应用内） | 本机及局域网内配对电脑上的任意 agent 互通（Claude、Codex、Pi、终端 TUI） |
+| 适合 | Claude 会话直连 | ChatGPT 任务直连 | 个人使用：本机或局域网内的跨厂商协作 |
+| 跨厂商 | — | — | ✅ 本机桥接 |
+| 多方参与 | agent teams（同门） | 任务 @ 提及 | ✅ 本机 agent + 人 |
+| 离线投递 | 只达在线会话 | 只达开着的任务 | ◐ 消息持久留在本地频道里* |
+| 共享历史/审计 | 各会话自己的记录 | 按任务 | ✅ append-only 日志，按 seq 对账，可重放 |
+| 统一花名册 | 只见 Claude 会话 | 只见 Codex 任务 | ✅ `ocs who` 列出 Claude、Codex、Pi 和 cmux surface |
+| Pi 支持 | — | — | ✅ 扩展直投，忙碌时排到下一轮 |
+| 终端 TUI 支持 | Claude Code 会话 | —（仅 Desktop 任务） | ✅ 所有终端可读写频道；cmux 可选直投 |
+| 跨载体回复引用 | 各自内部格式 | 各自内部格式 | ✅ 统一 `seq` + `--reply-to` |
+| 部署 | Claude Code 内置 | ChatGPT Desktop 内置 | 单个静态二进制，不要 daemon、账号或 API key |
 
 \* 持久化不包含自动催收：没有进程盯着谁上线，对方要等下次 `ocs inbox`、`ocs read`、被唤醒或有人提醒时才会读到积压。
 Claude 的生成会话名重启后仍会变，但唯一工作区别名会对应一个加盐的本机身份。Git 仓库使用规范化远程地址，
@@ -270,6 +270,17 @@ Windows 的注意事项（命名管道收件箱、防火墙规则）见 [docs/la
 什么都做不了。**配对等于允许那台机器给你的 agent 下提示**，和本机另一个会话的权限一样。
 局域网发现的应答只包含实例名、端口和公钥指纹。完整协议与威胁模型见 [docs/lan.md](./docs/lan.md)。
 
+### 不同网络：虚拟局域网
+
+`ocs lan` 只要求两台机器能连上对方的 TCP 47890 端口。不在同一个网络的机器，接入同一个虚拟局域网（Tailscale、WireGuard、ZeroTier 或公司 VPN）就满足了，ocs 不用做任何改动。这类网络一般不转发组播，局域网发现找不到对方，所以按地址配对：
+
+```bash
+# 机器 B，A 已经跑了 `ocs lan pair`
+ocs lan pair 7K2M-9QXD-… --addr 100.64.0.7:47890   # A 的 VPN 地址
+```
+
+信任库会记住地址，之后重连不再依赖发现。跨网段、只按地址（不靠组播）配对已在 macOS 和 Windows 之间实测；Tailscale、WireGuard 本身还不在测试矩阵里。建议走 VPN，不要把 47890 端口直接开到公网：协议本身双向认证加密，但走 VPN 端口根本不暴露在公网上。
+
 ### 其他情况：SSH
 
 不开局域网守护进程时 OCS 没有任何监听。两台个人机器已有免密 SSH 时，继续由用户的 SSH config 负责认证与 host key 校验，控制端直接调用目标机器上的本地工具：
@@ -285,20 +296,6 @@ ssh workbox herdr agent prompt reviewer "跑测试并总结失败" --wait --time
 
 SSH 免密方向决定角色。如果只有机器 B 能连接机器 A，那么 B 就是控制端，A 就是 `workbox`；不需要反向登录或新增 OCS adapter。面向人的指令应给远端 agent 带上 SSH 主机命名空间（例如 `workbox/reviewer`），避免与本机同名 agent 混淆。
 
-跨网络、跨组织、多方共享频道，用 Agent Party。
-
-## 本地版与托管版
-
-| | Open Cross-session | [Agent Party](https://github.com/leeguooooo/agentparty) |
-|---|---|---|
-| 适合 | 个人使用：一台机器上的 agent、局域网里的几台电脑 | 团队联调与共享频道 |
-| 部署 | 无，单个二进制 | 托管服务，或[私有部署](https://github.com/leeguooooo/agentparty)到 Cloudflare |
-| 范围 | 单机多 agent；同一局域网内配对的机器 | 跨网络、跨组织 |
-| 传输 | 本地 socket + JSONL 日志 | Cloudflare Workers + Durable Objects |
-| 协作能力 | 本地频道、统一花名册、直投、空闲通知 | 定向投递、租约、在线状态、任务看板、Web 界面 |
-
-两边命令习惯一致，`ocs upgrade` 打印迁移路径。私有部署的用量不超过 Workers、D1 和 SQLite Durable Objects 的免费额度时，不需要购买 Cloudflare 付费套餐。
-
 ## 常见问题
 
 为什么做 ocs、以及它绕开的那几个「看似成功、其实丢了」的坑：[Claude Code 和 Codex 怎么一起用？](https://blog.leeguoo.com/zh/posts/ocs-cross-agent-wake/)
@@ -313,7 +310,7 @@ Claude Code 自带的 cross-session 已经能让 Claude 和 Claude 互发消息�
 
 ### 不同电脑上的 AI agent 能互发消息吗？
 
-同一个局域网里可以。两台机器都跑 `ocs lan up`，用 `ocs lan pair` 配对一次，之后用 `<名字>@<对端>` 找远端的 agent。连接双向认证并加密（Ed25519 身份、带签名的 X25519 握手、AES-256-GCM），已在 macOS 和 Windows 之间实测。跨公网时用 SSH（见[跨机器](#跨机器)）或托管版 [Agent Party](https://agentparty.leeguoo.com)。
+同一个局域网里可以。两台机器都跑 `ocs lan up`，用 `ocs lan pair` 配对一次，之后用 `<名字>@<对端>` 找远端的 agent。连接双向认证并加密（Ed25519 身份、带签名的 X25519 握手、AES-256-GCM），已在 macOS 和 Windows 之间实测。不在同一个网络时，让两台机器接入同一个虚拟局域网（Tailscale、WireGuard、ZeroTier 或公司 VPN），配对时加 `--addr <对方VPN地址>:47890`，见[不同网络](#不同网络虚拟局域网)。
 
 ### 支持 Windows 吗？
 

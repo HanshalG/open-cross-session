@@ -109,7 +109,7 @@ describe("checkUpgrade（本地假 GitHub）", () => {
 });
 
 describe("ocs upgrade（端到端，假 GitHub + 假 installer）", () => {
-  test("落后时跑 installer，成功退出码 0，并附托管版提示", async () => {
+  test("落后时跑 installer，成功退出码 0，并附跨机器提示", async () => {
     const gh = fakeGithub({ tag: `v${bump(OCS_VERSION, 1)}` });
     const inst = fakeInstaller(0);
     const r = await runCli(["upgrade"], {
@@ -119,7 +119,8 @@ describe("ocs upgrade（端到端，假 GitHub + 假 installer）", () => {
     expect({ code: r.code, stderr: r.stderr }).toEqual({ code: 0, stderr: "" });
     expect(existsSync(inst.marker)).toBe(true);
     expect(r.stdout).toContain(`v${bump(OCS_VERSION, 1)}`);
-    expect(r.stdout).toContain("ocs upgrade --party");
+    expect(r.stdout).toContain("`ocs lan`");
+    expect(r.stdout).not.toContain("--party");
   }, T);
 
   test("installer 失败时透传其退出码", async () => {
@@ -187,7 +188,7 @@ describe("ocs upgrade（端到端，假 GitHub + 假 installer）", () => {
     expect(JSON.parse(bad.stdout)).toMatchObject({ name: "ocs", latest: null, update_available: false });
   }, T);
 
-  test("--party 只打印迁移指南，不联网不安装", async () => {
+  test("--party（已下线的旧入口）只打印 ocs lan 指引，不联网不安装，不再引向 Agent Party 站点", async () => {
     const gh = fakeGithub({ tag: `v${bump(OCS_VERSION, 1)}` });
     const inst = fakeInstaller(0);
     const r = await runCli(["upgrade", "--party"], {
@@ -195,7 +196,8 @@ describe("ocs upgrade（端到端，假 GitHub + 假 installer）", () => {
       [OCS_UPGRADE_INSTALLER_ENV]: inst.path,
     });
     expect({ code: r.code, stderr: r.stderr }).toEqual({ code: 0, stderr: "" });
-    expect(r.stdout).toContain("agentparty.leeguoo.com");
+    expect(r.stdout).toContain("--addr");
+    expect(r.stdout).not.toContain("agentparty.leeguoo.com");
     expect(gh.hits()).toBe(0);
     expect(existsSync(inst.marker)).toBe(false);
   }, T);

@@ -44,7 +44,7 @@ Native cross-session messaging stops at the product boundary. `ocs` adds the pie
 - **Local by default:** no daemon, account, API key, or server; one static binary and files under `~/.ocs`.
 - **Across your LAN:** paired computers reach each other's agents as `<address>@<peer>`; see above.
 
-When your LAN stops being enough — different networks, a team, other organizations — the same habits carry over to [Agent Party](https://github.com/leeguooooo/agentparty), a team integration and coordination solution for cross-machine, cross-org channels. Use the hosted service, or [self-host it](https://github.com/leeguooooo/agentparty) within Cloudflare's Free plan quotas.
+Machines on different networks work the same way once they share a virtual LAN (Tailscale, WireGuard, ZeroTier, or a company VPN): pair with the peer's VPN address. See [Different networks](#different-networks-a-virtual-lan).
 
 ## Name your sessions
 
@@ -122,10 +122,10 @@ ocs dm codex-01a06a98 "can you review this diff?"   # short, copyable target
 ocs inbox                     # resume unread threads after a restart
 
 # one-time migration for DM history created before v0.3.4
-ocs dm agentparty "continuing in the old thread" --inherit dm-<old-channel>
+ocs dm webapp "continuing in the old thread" --inherit dm-<old-channel>
 
 # multi-party rooms when you want them (channels are just files, nothing to manage)
-ocs send dev "status? @agentparty-d8 @piggo-67"
+ocs send dev "status? @webapp-d8 @piggo-67"
 ocs watch dev                 # tail a channel as a human observer
 ```
 
@@ -219,7 +219,7 @@ message stays in the append-only log for recovery with `ocs inbox`.
 | `ocs watch <ch>` | Tail a channel (`--interval-ms <n>`) |
 | `ocs doctor` | Health check for Claude, Codex, Pi, skills, and the data directory; `--fix` repairs safe local setup and re-checks it |
 | `ocs skill install` | Repair/update the bundled skill for Claude Code, Codex, and Pi, plus Pi's direct-wake extension |
-| `ocs upgrade` | Fetch and install the latest GitHub Release binary (`--check` only reports; `--party` prints the hosted Agent Party migration path) |
+| `ocs upgrade` | Fetch and install the latest GitHub Release binary (`--check` only reports) |
 | `ocs lan up \| pair \| who \| status \| peers \| scan \| unpair \| down` | Opt-in LAN mode: pair machines, then `ocs dm <address>@<peer>` and `ocs who --lan` (see [Cross-machine](#cross-machine)) |
 | `ocs version` | Print the version |
 
@@ -243,19 +243,19 @@ Claude Code and Codex each shipped their own cross-session capability. They are
 good — inside their own islands. ocs is not a replacement for either; it is the
 bridge between them, plus what neither provides:
 
-| | Claude native cross-session | Codex native cross-task | ocs | [Agent Party](https://github.com/leeguooooo/agentparty) |
-|---|---|---|---|---|
-| Reach | claude ↔ claude (local + cross-machine) | codex ↔ codex (inside ChatGPT Desktop) | any ↔ any on one machine and across paired LAN machines (Claude, Codex, Pi, terminal TUIs) | any ↔ any across networks and organizations |
-| Best fit | direct Claude session handoff | direct ChatGPT task handoff | personal cross-vendor coordination, on one machine or across your LAN | team integration across machines and organizations |
-| Cross-vendor | — | — | ✅ local + LAN bridge | ✅ cross-vendor channels |
-| Multi-party | agent teams (same harness) | task @ mentions | ✅ local agents + humans | ✅ hosted agents + humans |
-| Offline delivery | live sessions only | open tasks only | ◐ messages persist in the local channel* | ✅ persistent channel history + directed delivery |
-| Shared history / audit | per-session transcripts | per-task | ✅ append-only log, seq-referenced receipts, replayable | ✅ server-backed history, receipts, task and decision ledgers |
-| Unified roster | Claude sessions only | Codex tasks only | ✅ `ocs who` lists Claude, Codex, Pi, and cmux surfaces | ✅ `party agents` lists channel-wide addresses |
-| Pi support | — | — | ✅ direct wake extension, busy-turn queue | connector-dependent |
-| Terminal TUI support | Claude Code sessions | — (Desktop tasks only) | ✅ channel access everywhere; optional cmux wake | connector-dependent |
-| Thread references | harness-native | harness-native | ✅ portable `seq` + `--reply-to` across harnesses | ✅ channel receipts and ledgers |
-| Setup | built into Claude Code | built into ChatGPT Desktop | one static binary; no daemon, account, or API key | hosted or self-hosted service |
+| | Claude native cross-session | Codex native cross-task | ocs |
+|---|---|---|---|
+| Reach | claude ↔ claude (local + cross-machine) | codex ↔ codex (inside ChatGPT Desktop) | any ↔ any on one machine and across paired LAN machines (Claude, Codex, Pi, terminal TUIs) |
+| Best fit | direct Claude session handoff | direct ChatGPT task handoff | personal cross-vendor coordination, on one machine or across your LAN |
+| Cross-vendor | — | — | ✅ local + LAN bridge |
+| Multi-party | agent teams (same harness) | task @ mentions | ✅ local agents + humans |
+| Offline delivery | live sessions only | open tasks only | ◐ messages persist in the local channel* |
+| Shared history / audit | per-session transcripts | per-task | ✅ append-only log, seq-referenced receipts, replayable |
+| Unified roster | Claude sessions only | Codex tasks only | ✅ `ocs who` lists Claude, Codex, Pi, and cmux surfaces |
+| Pi support | — | — | ✅ direct wake extension, busy-turn queue |
+| Terminal TUI support | Claude Code sessions | — (Desktop tasks only) | ✅ channel access everywhere; optional cmux wake |
+| Thread references | harness-native | harness-native | ✅ portable `seq` + `--reply-to` across harnesses |
+| Setup | built into Claude Code | built into ChatGPT Desktop | one static binary; no daemon, account, or API key |
 
 \* Persistence has no auto-nudge: nothing watches for sessions coming online, so
 the peer sees backlog on its next `ocs inbox`, `ocs read`, wake, or human prompt. Claude's
@@ -314,6 +314,24 @@ redeem a live code. **Pairing means "this machine may prompt my agents"** — th
 power a local session has. Discovery replies reveal only an instance name, port, and key
 fingerprint. Full protocol and threat model: [docs/lan.md](./docs/lan.md).
 
+### Different networks: a virtual LAN
+
+`ocs lan` only needs the two machines to reach each other's TCP port 47890. Machines
+on different networks get that from a virtual LAN — Tailscale, WireGuard, ZeroTier,
+or a company VPN — with no change to ocs. Multicast discovery usually does not cross
+these networks, so pair by address:
+
+```bash
+# machine B, after A ran `ocs lan pair`
+ocs lan pair 7K2M-9QXD-… --addr 100.64.0.7:47890   # A's VPN address
+```
+
+The trust store remembers the address; reconnects need no discovery. Pairing across
+subnets by address alone (no multicast) is tested between macOS and Windows; Tailscale
+and WireGuard themselves are not part of the test matrix yet. Prefer a VPN over opening
+port 47890 to the internet: the protocol is authenticated and encrypted, but a VPN keeps
+the port off the public internet entirely.
+
 ### Anywhere else: SSH
 
 Without the LAN daemon OCS has no listener at all. When two personal machines already
@@ -334,20 +352,6 @@ A, then B is the controller and A is `workbox`; no reverse login or OCS adapter 
 needed. Prefix remote targets with the SSH host in human-facing instructions (for
 example `workbox/reviewer`) so they cannot be confused with same-named local agents.
 
-For cross-network or cross-org coordination and shared multi-party channels, use Agent Party.
-
-## Local vs hosted
-
-| | Open Cross-session | [Agent Party](https://github.com/leeguooooo/agentparty) |
-|---|---|---|
-| Best for | personal use: your agents on one machine and your computers on one LAN | team integration and shared channels |
-| Deployment | none — a single binary | hosted service, or [self-hosted](https://github.com/leeguooooo/agentparty) on Cloudflare |
-| Scope | one machine, many agents; paired machines on one LAN | across networks and organizations |
-| Transport | local sockets + JSONL log | Cloudflare Workers + Durable Objects |
-| Included coordination | local channels, unified roster, direct wake, idle notifications | directed delivery, leases, presence, tasks, web UI |
-
-Same command habits on both. `ocs upgrade --party` prints the migration path. A self-hosted Agent Party can run within the Cloudflare Free plan quotas for Workers, D1, and SQLite-backed Durable Objects.
-
 ## FAQ
 
 The story behind ocs, and the "it said OK but the message was gone" bugs it is built around: [Making Claude Code and Codex talk to each other](https://blog.leeguoo.com/en/posts/ocs-cross-agent-wake/).
@@ -362,7 +366,7 @@ Claude Code's built-in cross-session messaging already covers claude ↔ claude,
 
 ### Can AI agents on different computers message each other?
 
-Yes, on the same LAN. Run `ocs lan up` on both machines, pair them once with `ocs lan pair`, then address a remote agent as `<name>@<peer>`. Traffic is mutually authenticated and encrypted (Ed25519 identities, signed X25519 handshake, AES-256-GCM); tested between macOS and Windows. Across the internet, use SSH (see [Cross-machine](#cross-machine)) or the hosted [Agent Party](https://agentparty.leeguoo.com).
+Yes, on the same LAN. Run `ocs lan up` on both machines, pair them once with `ocs lan pair`, then address a remote agent as `<name>@<peer>`. Traffic is mutually authenticated and encrypted (Ed25519 identities, signed X25519 handshake, AES-256-GCM); tested between macOS and Windows. On different networks, put both machines on the same virtual LAN (Tailscale, WireGuard, ZeroTier, or a company VPN) and pair with `--addr <peer-vpn-ip>:47890` — see [Different networks](#different-networks-a-virtual-lan).
 
 ### Does it work on Windows?
 

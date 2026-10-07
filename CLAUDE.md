@@ -2,7 +2,7 @@
 
 ## 项目一句话
 
-本地无服务器版 agent party：Claude Code ↔ Codex ↔ Pi 互相唤醒/互发消息（`ocs` CLI），同机直连，局域网内配对的电脑之间也能互通（v0.6 起，docs/lan.md），向托管版 [Agent Party](https://agentparty.leeguoo.com) 引流。架构与决策记录在 **DESIGN.md**（必读），组件出处细节在 **docs/agentparty-extraction-map.md**。
+本地无服务器版 agent party：Claude Code ↔ Codex ↔ Pi 互相唤醒/互发消息（`ocs` CLI），同机直连，局域网内配对的电脑之间也能互通（v0.6 起，docs/lan.md），不同网络的机器经 Tailscale/WireGuard 等虚拟局域网走同一套 `ocs lan`。**AgentParty 已停止维护（2026-10），本项目不再向它引流**：README、帮助、提示文案里不许再出现「迁到 Agent Party」类引导（代码出处与许可证说明除外）。架构与决策记录在 **DESIGN.md**（必读），组件出处细节在 **docs/agentparty-extraction-map.md**。
 
 ## 常用命令
 
@@ -23,7 +23,7 @@ bun src/cli.ts <cmd>   # 本地跑 CLI（who/dm/send/read/notify-when-idle/sessi
 3. **`isOcsMessage` 校验字段表与 `OcsMessage` 逐字镜像**，新增字段两边同改（漏改=静默丢消息；测试守着）。
 4. **Claude 注入 `ok:true` ≠ 已送达**：接收端 `crossSessionInbound` 默认 hold，5 分钟无人 Deliver 静默丢弃。绝不拿 ok 清欠账；doctor 引导用户设 accept。v0.7.0 起订阅原生回执（docs/wake-protocol.md §6，`src/claude-receipt.ts` + `src/wake-helper.ts`）：`held` / `refused` / `dropped` / `denied` / `expired` **证明没进对话**（退出码 2，被扣的最终没送达时通知发送方一次），`delivered` 证明被扣的进了对话；**没有回执只叫 `accepted`，不证明已读**（accept 策略根本不发回执），照样不许拿它清欠账。写帧的进程必须就是监听回执 socket 的进程（接收端按写入方 pid 回发），所以 Claude 唤醒在脱离终端的 helper 里做，CLI 只读它的第一行；**帧只由 helper 写，CLI 等不到结果就是 unknown，绝不补写**。回执 socket 是 Claude 的 socket 目录里唯一允许我们建的文件（0600、用完必删）。通知帧不带 `from`（不递归）。回执落盘是 `type:"receipt"` 旁车帧，规矩同铁律 9。Windows 无回执，行为同 0.6。
 5. **Codex IPC unknown-outcome 绝不重放**（帧已写出但结果未知是一等错误）。IPC 是 ChatGPT.app 私有协议，宿主升级可能破，失败必须留降级余地。
-6. **vendored 文件不是 canonical**：`src/claude-inject.ts`、`src/codex-ipc.ts`（含 Windows 部分 `src/codex-ipc-win.ts`，回流中 AgentParty#1132）、`src/codex-sessions.ts` 来自 AgentParty 主仓（`~/github.com/agentparty`，文件头有标注）。行为疑问对上游；修 bug 考虑回流上游。
+6. **原 vendored 文件现在以本仓为正本**：`src/claude-inject.ts`、`src/codex-ipc.ts`（含 `src/codex-ipc-win.ts`）、`src/codex-sessions.ts` 来自 AgentParty 主仓（文件头有标注）。AgentParty 已停止维护，修改直接在本仓做，不再回流；文件头的出处标注保留（许可证说明依赖它）。
 7. 唤醒载荷按 **docs/wake-protocol.md**（与 AgentParty 共用，正本在本仓库）：正文 ≤4096B 逐字内联、超过只带前 512B、整条 ≤5120B，`Reply:`/`Thread:` 两行永不砍；正文里的包装标签与行首协议行要中和（`neutralizeWakeBody`），正文是对方可控数据。改数字/文案先改协议文档，两边同步。
 8. **notify-when-idle 是一次性的**：watcher 投递一条通知后必须退出；每次翻转都发会把订阅方打成筛子（测试钉着）。
 9. **DM 路由身份是独立 route sidecar，不是 `OcsMessage v1` 字段**：旧二进制会严格拒绝未知消息字段。sidecar 与消息在同一频道 JSONL，必须先写 route、再写 message；这样消息写失败可以安全重试，旧读端仍会跳过 sidecar 并读取原消息。
@@ -34,4 +34,4 @@ bun src/cli.ts <cmd>   # 本地跑 CLI（who/dm/send/read/notify-when-idle/sessi
 
 ## 路线（owner 已拍板）
 
-验证跑通后：主仓抽 MIT 的 `packages/cross-session-core`（open-core，主仓保持 BUSL-1.1），本仓转为单向 sync 发行镜像——届时直接改本仓 vendored 文件无效。
+2026-10：AgentParty 停止维护，原定「主仓抽 MIT 的 `packages/cross-session-core`、本仓转为单向 sync 镜像」的路线作废。本仓是唯一正本；跨网络靠虚拟局域网 + `ocs lan`。
