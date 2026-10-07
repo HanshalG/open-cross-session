@@ -37,6 +37,8 @@ export const LAN_DEFAULT_PORT = 47890;
 export const PAIR_OFFER_TTL_MS = 10 * 60 * 1000;
 /** 一份邀请最多容忍这么多次错码，之后作废——56 位令牌只给在线猜这几次机会。 */
 export const PAIR_MAX_FAILURES = 5;
+/** Trust granted when pairing without a period flag: 8 hours (a working day). Permanent needs --forever. */
+export const DEFAULT_PEER_TTL_MS = 8 * 60 * 60 * 1000;
 
 export function lanDir(env: NodeJS.ProcessEnv = process.env): string {
   return join(ocsHome(env), "lan");
@@ -181,6 +183,44 @@ export interface LanPeer {
   addrs: string[];
   paired_at: string;
   last_seen?: string;
+  /** When trust ends; absent = permanent (own devices, or anything paired before 0.8). */
+  expires_at?: string;
+  /** DMs still accepted; absent = unlimited. Inactive at 0 (`--once` pairs with 1). */
+  uses_left?: number;
+}
+
+/** Period chosen by the inviting side; null ttl_ms / uses means unlimited. */
+export interface PeerGrant {
+  ttl_ms: number | null;
+  uses: number | null;
+}
+
+export const DEFAULT_PEER_GRANT: PeerGrant = { ttl_ms: DEFAULT_PEER_TTL_MS, uses: null };
+
+/** A period as stored in the trust store (absolute time). */
+export interface PeerTerms {
+  expires_at?: string;
+  uses_left?: number;
+}
+
+export function grantTerms(grant: PeerGrant, now = Date.now()): PeerTerms {
+  return {
+    ...(grant.ttl_ms === null ? {} : { expires_at: new Date(now + grant.ttl_ms).toISOString() }),
+    ...(grant.uses === null ? {} : { uses_left: grant.uses }),
+  };
+}
+
+export function isPeerGrant(value: unknown): value is PeerGrant {
+  if (typeof value !== "object" || value === null) return false;
+  const g = value as Record<string, unknown>;
+  const ok = (v: unknown) => v === null || (Number.isInteger(v) && (v as number) > 0);
+  return ok(g.ttl_ms) && ok(g.uses);
+}
+
+/** An expired or used-up peer counts as unpaired: not trusted at the handshake, no DMs either way. */
+export function peerActive(peer: LanPeer, now = Date.now()): boolean {
+  if (peer.expires_at !== undefined && !(Date.parse(peer.expires_at) > now)) return false;
+  return peer.uses_left === undefined || peer.uses_left > 0;
 }
 
 function peersPath(env: NodeJS.ProcessEnv): string {
@@ -195,6 +235,8 @@ function isPeer(value: unknown): value is LanPeer {
   // 指纹必须能从公钥重算出来：手改信任库只改其一，一律当损坏处理。
   const raw = Buffer.from(p.key, "base64");
   if (raw.length !== 32 || fingerprintOf(raw) !== p.fingerprint) return false;
+  if (p.expires_at !== undefined && (typeof p.expires_at !== "string" || Number.isNaN(Date.parse(p.expires_at)))) return false;
+  if (p.uses_left !== undefined && (!Number.isInteger(p.uses_left) || (p.uses_left as number) < 0)) return false;
   return typeof p.name === "string" && Array.isArray(p.addrs) && p.addrs.every((a) => typeof a === "string") &&
     typeof p.paired_at === "string";
 }
@@ -208,14 +250,33 @@ export function listPeers(env: NodeJS.ProcessEnv = process.env): LanPeer[] {
   return peers;
 }
 
+/** Every trust-store write also drops inactive peers, so expired entries do not linger. */
 function savePeers(peers: LanPeer[], env: NodeJS.ProcessEnv): void {
-  writePrivateJson(peersPath(env), { v: 1, peers });
+  const now = Date.now();
+  writePrivateJson(peersPath(env), { v: 1, peers: peers.filter((peer) => peerActive(peer, now)) });
+}
+
+/** Peers whose trust is still active. */
+export function activePeers(env: NodeJS.ProcessEnv = process.env, now = Date.now()): LanPeer[] {
+  return listPeers(env).filter((peer) => peerActive(peer, now));
+}
+
+/** Remove inactive peers; returns the removed ones. */
+export function pruneExpiredPeers(env: NodeJS.ProcessEnv = process.env): LanPeer[] {
+  return withLock("peers", env, () => {
+    const peers = listPeers(env);
+    const now = Date.now();
+    const gone = peers.filter((peer) => !peerActive(peer, now));
+    if (gone.length > 0) savePeers(peers, env);
+    return gone;
+  });
 }
 
 export function findPeerByFingerprint(fp: string, env: NodeJS.ProcessEnv = process.env): LanPeer | null {
-  return listPeers(env).find((peer) => peer.fingerprint === fp) ?? null;
+  return activePeers(env).find((peer) => peer.fingerprint === fp) ?? null;
 }
 
+/** Find a peer by label or fingerprint prefix, inactive ones included (callers check peerActive). */
 export function findPeer(query: string, env: NodeJS.ProcessEnv = process.env): LanPeer | null {
   const peers = listPeers(env);
   const lower = query.toLowerCase();
@@ -239,9 +300,13 @@ function uniqueLabel(wanted: string, peers: readonly LanPeer[], fp: string): str
   }
 }
 
-/** 新增或更新一个受信对端（同指纹覆盖，保留原 label）。返回最终 label。 */
+/**
+ * Add or update a trusted peer (same fingerprint overwrites, keeping its label). `terms` is the
+ * period from this pairing and replaces the old one wholesale — re-pairing a permanently
+ * trusted machine for 8 hours makes it 8 hours. Omitted = permanent.
+ */
 export function trustPeer(
-  input: { key: Buffer; name: string; label?: string; addr?: string },
+  input: { key: Buffer; name: string; label?: string; addr?: string; terms?: PeerTerms },
   env: NodeJS.ProcessEnv = process.env,
 ): LanPeer {
   return withLock("peers", env, () => {
@@ -258,6 +323,8 @@ export function trustPeer(
       addrs: [...new Set([...(input.addr === undefined ? [] : [input.addr]), ...(existing?.addrs ?? [])])].slice(0, 4),
       paired_at: existing?.paired_at ?? new Date().toISOString(),
       last_seen: new Date().toISOString(),
+      ...(input.terms?.expires_at === undefined ? {} : { expires_at: input.terms.expires_at }),
+      ...(input.terms?.uses_left === undefined ? {} : { uses_left: input.terms.uses_left }),
     };
     savePeers([...peers.filter((p) => p.fingerprint !== fp), peer], env);
     return peer;
@@ -276,6 +343,38 @@ export function notePeerAddress(fp: string, addr: string, env: NodeJS.ProcessEnv
   });
 }
 
+/**
+ * Take one use for an incoming DM (atomic under the lock). Returns false when the peer is no
+ * longer active — that DM must not be stored. The DM that takes the last use still goes
+ * through; the peer is inactive afterwards and pruned on the next write.
+ */
+export function consumePeerUse(fp: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  return withLock("peers", env, () => {
+    const peers = listPeers(env);
+    const peer = peers.find((p) => p.fingerprint === fp);
+    if (peer === undefined || !peerActive(peer)) return false;
+    if (peer.uses_left === undefined) return true;
+    peer.uses_left--;
+    // Skip savePeers' pruning: the DM that just took the last use is still being delivered.
+    writePrivateJson(peersPath(env), { v: 1, peers });
+    return true;
+  });
+}
+
+/** `ocs lan trust`: change this machine's period for a peer (the other side keeps its own). */
+export function setPeerTerms(fp: string, terms: PeerTerms, env: NodeJS.ProcessEnv = process.env): LanPeer | null {
+  return withLock("peers", env, () => {
+    const peers = listPeers(env);
+    const at = peers.findIndex((p) => p.fingerprint === fp);
+    if (at < 0) return null;
+    const { expires_at: _e, uses_left: _u, ...rest } = peers[at]!;
+    const next: LanPeer = { ...rest, ...terms };
+    peers[at] = next;
+    savePeers(peers, env);
+    return next;
+  });
+}
+
 export function removePeer(fp: string, env: NodeJS.ProcessEnv = process.env): boolean {
   return withLock("peers", env, () => {
     const peers = listPeers(env);
@@ -288,9 +387,29 @@ export function removePeer(fp: string, env: NodeJS.ProcessEnv = process.env): bo
 
 // ───────────────────────── 配对邀请 ─────────────────────────
 
+/** A pairing request from an unpaired machine, waiting for the inviting human to check the code. */
+export interface PairRequest {
+  id: string;
+  fingerprint: string;
+  /** Ed25519 public key, base64. */
+  key: string;
+  /** Self-reported name (sanitized to the label charset, display only). */
+  name: string;
+  /** 6-digit check code, derived by both ends from this handshake's session keys. */
+  sas: string;
+  addr?: string;
+  at: string;
+}
+
 export interface PairOffer {
   v: 1;
   id: string;
+  /** "code": the other side redeems a pairing code (0.7 style); "approve": it sends a request we confirm. Absent = code. */
+  mode?: "code" | "approve";
+  /** Period granted on success; absent (a 0.7 invitation) = permanent. */
+  grant?: PeerGrant;
+  request?: PairRequest;
+  decision?: { request_id: string; approved: boolean };
   /** 令牌只存摘要：邀请文件泄露不等于码泄露。 */
   token_sha256: string;
   /** 兑码方配对成功后在本机的 label（发码时 --label 指定；缺省用对方自报名）。 */
@@ -307,7 +426,7 @@ function offersDir(env: NodeJS.ProcessEnv): string {
 }
 
 export function createPairOffer(
-  input: { label?: string; ttlMs?: number },
+  input: { label?: string; ttlMs?: number; mode?: "code" | "approve"; grant?: PeerGrant },
   env: NodeJS.ProcessEnv = process.env,
 ): { offer: PairOffer; token: Buffer } {
   ensureDir(offersDir(env));
@@ -316,6 +435,9 @@ export function createPairOffer(
   const offer: PairOffer = {
     v: 1,
     id: randomUUID(),
+    ...(input.mode === undefined ? {} : { mode: input.mode }),
+    ...(input.grant === undefined ? {} : { grant: input.grant }),
+    // In approve mode the token is never shown; it only keeps the old field mandatory.
     token_sha256: tokenDigest(token),
     ...(input.label === undefined ? {} : { label: input.label }),
     created_at: new Date(now).toISOString(),
@@ -373,7 +495,8 @@ export function redeemPairOffer(
   now = Date.now(),
 ): RedeemResult {
   return withLock("offers", env, () => {
-    const open = openPairOffers(env, now);
+    // Only code invitations can be redeemed with a token; approve ones need a request + human confirmation.
+    const open = openPairOffers(env, now).filter((offer) => (offer.mode ?? "code") === "code");
     if (open.length === 0) return { ok: false, reason: "no-offer" } as const;
     const digest = tokenDigest(token);
     let hit: PairOffer | null = null;
@@ -396,6 +519,95 @@ export function redeemPairOffer(
       writePrivateJson(join(offersDir(env), `${offer.id}.json`), offer);
     }
     return { ok: false, reason: "bad-code" } as const;
+  });
+}
+
+export function offerTerms(offer: PairOffer, now = Date.now()): PeerTerms {
+  return offer.grant === undefined ? {} : grantTerms(offer.grant, now);
+}
+
+// ── approve mode: request → human confirmation ──
+
+/** How long a request waits for the human. The daemon holds that connection meanwhile. */
+export const PAIR_REQUEST_WAIT_MS = 75_000;
+
+export type SubmitResult =
+  | { ok: true; offerId: string; requestId: string }
+  | { ok: false; reason: "no-offer" | "busy" };
+
+/** Daemon got a pair-request: attach it to the open approve invitation; busy if one is already waiting. */
+export function submitPairRequest(
+  input: Omit<PairRequest, "id" | "at">,
+  env: NodeJS.ProcessEnv = process.env,
+  now = Date.now(),
+): SubmitResult {
+  return withLock("offers", env, () => {
+    const offer = openPairOffers(env, now)
+      .filter((o) => o.mode === "approve")
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
+    if (offer === undefined) return { ok: false, reason: "no-offer" } as const;
+    if (offer.request !== undefined && now - Date.parse(offer.request.at) < PAIR_REQUEST_WAIT_MS + 5_000) {
+      return { ok: false, reason: "busy" } as const;
+    }
+    const request: PairRequest = { ...input, id: randomUUID(), at: new Date(now).toISOString() };
+    const { decision: _d, ...rest } = offer;
+    writePrivateJson(join(offersDir(env), `${offer.id}.json`), { ...rest, request });
+    return { ok: true, offerId: offer.id, requestId: request.id } as const;
+  });
+}
+
+/** The inviting human (or `ocs lan approve <code>`) decides. False if withdrawn or already decided. */
+export function decidePairRequest(
+  offerId: string,
+  requestId: string,
+  approved: boolean,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return withLock("offers", env, () => {
+    const offer = loadPairOffer(offerId, env);
+    if (offer === null || offer.status !== "open" || offer.request?.id !== requestId || offer.decision !== undefined) return false;
+    writePrivateJson(join(offersDir(env), `${offerId}.json`), { ...offer, decision: { request_id: requestId, approved } });
+    return true;
+  });
+}
+
+export type SettleResult =
+  | { state: "approved"; offer: PairOffer; peer: LanPeer }
+  | { state: "rejected" | "pending" | "timeout" | "gone" };
+
+/**
+ * Daemon polls for the outcome. On approval it writes the trust store and marks the invitation
+ * paired under the **same lock** (as redeeming does, so the inviting CLI closing the offer cannot
+ * tear it). Refusal or `giveUp` detaches the request and leaves the invitation open for the next.
+ * If the human decided just before `giveUp`, the decision wins over the timeout.
+ */
+export function settlePairRequest(
+  offerId: string,
+  requestId: string,
+  onApprove: (offer: PairOffer, request: PairRequest) => LanPeer,
+  giveUp: boolean,
+  env: NodeJS.ProcessEnv = process.env,
+): SettleResult {
+  return withLock("offers", env, () => {
+    const offer = loadPairOffer(offerId, env);
+    if (offer === null || offer.request?.id !== requestId) return { state: "gone" } as const;
+    const path = join(offersDir(env), `${offerId}.json`);
+    const { request: _r, decision: _d, ...rest } = offer;
+    if (offer.decision?.request_id === requestId && offer.decision.approved && offer.status === "open") {
+      const peer = onApprove(offer, offer.request);
+      const done: PairOffer = { ...offer, status: "paired", peer: { label: peer.label, fingerprint: peer.fingerprint, name: peer.name } };
+      writePrivateJson(path, done);
+      return { state: "approved", offer: done, peer } as const;
+    }
+    if (offer.decision?.request_id === requestId) {
+      writePrivateJson(path, rest);
+      return { state: "rejected" } as const;
+    }
+    if (giveUp || offer.status !== "open" || Date.parse(offer.expires_at) <= Date.now()) {
+      if (offer.status === "open") writePrivateJson(path, rest);
+      return { state: "timeout" } as const;
+    }
+    return { state: "pending" } as const;
   });
 }
 

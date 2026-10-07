@@ -114,22 +114,37 @@ describe("ocs lan 端到端（两台机器）", () => {
       const found = JSON.parse(scan.stdout) as Array<{ name: string; port: number; paired_as: string | null }>;
       expect(found).toContainEqual(expect.objectContaining({ name: "alpha", port: portA, paired_as: null }));
 
-      // A 出码并等待；B 兑码（不给 --addr，走发现）
+      // A prints a copyable pairing text and waits; B runs the join line from it
+      // (its --addr points at real NICs where nothing listens, so B falls back to
+      // discovery). A has no TTY here, so it is approved with `ocs lan approve <code>`.
       const issuer = Bun.spawn([process.execPath, CLI, "lan", "pair", "--label", "bee"], { env: a.env, stdout: "pipe", stderr: "pipe" });
       const reader = issuer.stdout.getReader();
       let issued = "";
-      const code = await (async () => {
+      const readUntil = async (re: RegExp): Promise<RegExpExecArray> => {
         for (;;) {
+          const match = re.exec(issued);
+          if (match !== null) return match;
           const { value, done } = await reader.read();
           if (done) throw new Error(`issuer exited: ${issued}`);
           issued += new TextDecoder().decode(value);
-          const match = /([0-9A-Z]{4}(?:-[0-9A-Z]{4}){5})/.exec(issued);
-          if (match !== null) return match[1]!;
         }
-      })();
-      const joined = await run(b, ["lan", "pair", code]);
-      expect(joined.code).toBe(0);
-      expect(joined.stdout).toContain("paired with alpha");
+      };
+      const joinLine = (await readUntil(/ocs lan join ([a-z2-7]{20})( --addr \S+)?/))[1]!;
+      expect(issued).toContain("copy from here");
+      expect(issued).toContain("Trust: 8h left");
+      const joiner = Bun.spawn([process.execPath, CLI, "lan", "join", joinLine], { env: b.env, stdout: "pipe", stderr: "pipe" });
+      const sas = (await readUntil(/check code: (\d{3}) (\d{3})/)).slice(1, 3).join("");
+      expect(issued).toContain(`ocs lan approve ${sas}`);
+      // A wrong code approves nothing
+      const wrong = await run(a, ["lan", "approve", sas === "000000" ? "111111" : "000000"]);
+      expect(wrong.code).toBe(1);
+      const approved = await run(a, ["lan", "approve", sas.slice(0, 3), sas.slice(3)]);
+      expect(approved.code).toBe(0);
+      const [joinOut] = await Promise.all([new Response(joiner.stdout).text(), joiner.exited]);
+      expect(joiner.exitCode).toBe(0);
+      expect(joinOut).toContain(`${sas.slice(0, 3)} ${sas.slice(3)}`); // B showed the same code
+      expect(joinOut).toContain("paired with alpha");
+      expect(joinOut).toMatch(/trust: 8h left/);
       for (;;) {
         const { value, done } = await reader.read();
         if (done) break;
@@ -138,6 +153,9 @@ describe("ocs lan 端到端（两台机器）", () => {
       await issuer.exited;
       expect(issuer.exitCode).toBe(0);
       expect(issued).toContain("paired with bee (bravo)");
+      const peersA = JSON.parse((await run(a, ["lan", "peers", "--json"])).stdout) as Array<{ label: string; expires_at?: string }>;
+      const expiresA = Date.parse(peersA.find((p) => p.label === "bee")!.expires_at!);
+      expect(Math.abs(expiresA - (Date.now() + 8 * 3600_000))).toBeLessThan(60_000);
 
       // B（tester 会话）→ A 的 worker-a
       const dm = await run(b, ["dm", "worker-a@alpha", "ping over the lan"]);

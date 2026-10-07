@@ -22,9 +22,14 @@ import {
   liveDaemonState,
   loadLanConfig,
   loadOrCreateIdentity,
+  consumePeerUse,
   notePeerAddress,
+  offerTerms,
+  PAIR_REQUEST_WAIT_MS,
   redeemPairOffer,
   sanitizePeerLabel,
+  settlePairRequest,
+  submitPairRequest,
   trustPeer,
   writeDaemonState,
   type LanConfig,
@@ -195,6 +200,8 @@ export async function handleLanDm(
   peer: LanPeer,
   localLang: Lang,
   env: NodeJS.ProcessEnv = process.env,
+  /** Called right before storing; false = the peer's trust ran out, store nothing. */
+  consumeUse: () => boolean = () => true,
 ): Promise<Reply> {
   const { from, from_key: fromKey, to, body } = req;
   if (typeof from !== "string" || !NAME_RE.test(from)) return { ok: false, error: "bad-request", detail: "from" };
@@ -238,6 +245,10 @@ export async function handleLanDm(
   // 频道日志里的 from 必须过 NAME_RE（'@' 不在字符集里，旧二进制会拒读整条）。
   const logFrom = [`${from}.${peer.label}`, `${fromKey}.${peer.label}`].find((name) => NAME_RE.test(name));
   if (logFrom === undefined) return { ok: false, error: "bad-request", detail: "sender name too long" };
+  // Count a use only for a DM that is about to be stored (a typo'd address must not burn a
+  // --once grant). Expired since the handshake, or the last use taken by a concurrent DM:
+  // treat as unpaired and store nothing.
+  if (!consumeUse()) return { ok: false, error: "unpaired" };
   const toIdentity = OCS_IDENTITY_RE.test(resolved.identity) ? resolved.identity : undefined;
   const message = appendMessage({
     channel,
@@ -294,9 +305,63 @@ export function handleLanPair(
     name: claimed,
     ...(offer.label === undefined ? {} : { label: offer.label }),
     ...(client.port === null ? {} : { addr: `${client.host}:${client.port}` }),
+    terms: offerTerms(offer),
   }, env), env);
   if (!redeemed.ok) return { ok: false, error: redeemed.reason };
-  return { ok: true, name: config.name };
+  return { ok: true, name: config.name, ...termsReply(redeemed.peer) };
+}
+
+/** Tell the peer the period we granted so it trusts us back for the same (old clients ignore it). */
+function termsReply(peer: LanPeer): Record<string, unknown> {
+  return {
+    ...(peer.expires_at === undefined ? {} : { expires_at: peer.expires_at }),
+    ...(peer.uses_left === undefined ? {} : { uses: peer.uses_left }),
+  };
+}
+
+/**
+ * Pair request (0.8+): attach to the open approve invitation and wait for the local human to
+ * compare the 6-digit code and confirm. The connection is held meanwhile (it still counts
+ * against the unauthenticated slots), for at most PAIR_REQUEST_WAIT_MS. When nobody is
+ * waiting (no `ocs lan pair` running) the answer is an immediate no-offer — strangers cannot
+ * pop prompts onto this machine's screen.
+ */
+export async function handleLanPairRequest(
+  req: Record<string, unknown>,
+  client: { key: Buffer; fingerprint: string; host: string; port: number | null; sas: string },
+  config: LanConfig,
+  identity: LanIdentity,
+  env: NodeJS.ProcessEnv = process.env,
+  options: { waitMs?: number; pollMs?: number } = {},
+): Promise<Reply> {
+  if (client.fingerprint === identity.fingerprint) return { ok: false, error: "self" };
+  const name = typeof req.name === "string" ? sanitizePeerLabel(req.name) ?? "peer" : "peer";
+  const addr = client.port === null ? undefined : `${client.host}:${client.port}`;
+  const submitted = submitPairRequest({
+    fingerprint: client.fingerprint,
+    key: client.key.toString("base64"),
+    name,
+    sas: client.sas,
+    ...(addr === undefined ? {} : { addr }),
+  }, env);
+  if (!submitted.ok) return { ok: false, error: submitted.reason };
+  const approve = (offer: Parameters<Parameters<typeof settlePairRequest>[2]>[0]) => trustPeer({
+    key: client.key,
+    name,
+    ...(offer.label === undefined ? {} : { label: offer.label }),
+    ...(addr === undefined ? {} : { addr }),
+    terms: offerTerms(offer),
+  }, env);
+  const deadline = Date.now() + (options.waitMs ?? PAIR_REQUEST_WAIT_MS);
+  for (;;) {
+    const giveUp = Date.now() >= deadline;
+    const result = settlePairRequest(submitted.offerId, submitted.requestId, approve, giveUp, env);
+    if (result.state === "approved") return { ok: true, name: config.name, ...termsReply(result.peer) };
+    if (result.state === "rejected") return { ok: false, error: "rejected" };
+    if (result.state === "timeout") return { ok: false, error: "timeout" };
+    if (result.state === "gone") return { ok: false, error: "cancelled" };
+    await new Promise((resolve) => setTimeout(resolve, options.pollMs ?? 250));
+  }
 }
 
 // ───────────────────────── 服务 ─────────────────────────
@@ -421,6 +486,18 @@ export async function startLanServer(
           }, config, identity, env);
         }
         log(`pair from ${ip} fp=${conn.clientFingerprint.slice(0, 16)}: ${reply.ok ? "paired" : String(reply.error)}`);
+      } else if (op === "pair-request") {
+        if (!pairLimiter.take(ip)) reply = { ok: false, error: "rate-limited" };
+        else {
+          reply = await handleLanPairRequest(req, {
+            key: conn.clientKey,
+            fingerprint: conn.clientFingerprint,
+            host: ip,
+            port: conn.clientPort,
+            sas: conn.sas,
+          }, config, identity, env);
+        }
+        log(`pair-request from ${ip} fp=${conn.clientFingerprint.slice(0, 16)}: ${reply.ok ? "paired" : String(reply.error)}`);
       } else if (peer === null) {
         reply = { ok: false, error: "unpaired" };
         log(`rejected unpaired ${op} from ${ip} fp=${conn.clientFingerprint.slice(0, 16)}`);
@@ -435,7 +512,7 @@ export async function startLanServer(
           reply = { ok: false, error: "quota-exceeded" };
           log(`quota exceeded for ${peer.label}`);
         } else if (op === "dm") {
-          reply = await handleLanDm(req, peer, input.lang, env);
+          reply = await handleLanDm(req, peer, input.lang, env, () => consumePeerUse(peer.fingerprint, env));
           log(`dm from ${peer.label} to ${String(req.to)}: ${reply.ok ? `seq ${String(reply.seq)} ${String(reply.outcome)}` : String(reply.error)}`);
         } else reply = { ok: false, error: "unknown-op" };
       }

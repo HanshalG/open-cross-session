@@ -3,6 +3,9 @@
 
 import type { Lang } from "./i18n.ts";
 
+const INSTALL_SH = "curl -fsSL https://raw.githubusercontent.com/leeguooooo/open-cross-session/main/install.sh | sh";
+const INSTALL_PS = "irm https://raw.githubusercontent.com/leeguooooo/open-cross-session/main/install.ps1 | iex";
+
 export interface LanCatalog {
   help: string;
   usage: string;
@@ -20,7 +23,33 @@ export interface LanCatalog {
   statusPeers: (count: number) => string;
   statusOffers: (count: number) => string;
   peersNone: string;
-  peerLine: (label: string, name: string, fp: string, addr: string, lastSeen: string) => string;
+  peerLine: (label: string, name: string, fp: string, addr: string, lastSeen: string, terms: string) => string;
+  peersPruned: (labels: string) => string;
+  peerExpired: (label: string) => string;
+  termsForever: string;
+  termsUntil: (span: string, at: string) => string;
+  termsUses: (n: number) => string;
+  termsJoin: string;
+  grantConflict: string;
+  badDuration: (value: string) => string;
+  trustUsage: string;
+  trustUpdated: (label: string, terms: string) => string;
+  trustLocalOnly: string;
+  pairInvite: (i: { name: string; target: string; addrs: string[]; terms: string; minutes: number }) => string;
+  pairTermsLine: (terms: string) => string;
+  pairWaitingRequest: string;
+  pairRequestShown: (name: string, addr: string, sas: string, fp: string) => string;
+  pairAskConfirm: string;
+  pairApproveHint: (sas: string) => string;
+  pairRequestRejected: string;
+  pairRequestWithdrawn: string;
+  decideNone: string;
+  approveMismatch: (given: string) => string;
+  approveDone: (name: string) => string;
+  joinBadTarget: (target: string) => string;
+  joinDaemonHint: string;
+  joinShowSas: (serverName: string, sas: string) => string;
+  joinErrorHint: (code: string) => string | null;
   pairNeedsDaemon: string;
   pairIssued: (code: string, minutes: number) => string;
   pairAddrHint: (addrs: string) => string;
@@ -69,11 +98,17 @@ export interface LanCatalog {
 const en: LanCatalog = {
   help: `  ocs lan up [--port <n>] [--bind <ip>] [--name <name>] [--no-discover | --discover]
       Start the LAN daemon (off by default). Only paired machines can reach your agents.
-  ocs lan pair [--label <name>]            show a one-time code (10 min) and wait for it
-  ocs lan pair <code> [--addr <host:port>] [--label <name>]   redeem a code from another machine
+  ocs lan pair [--once] [--for <30m|8h|7d> | --forever] [--label <name>]
+      Print a pairing text to send to the other person and wait for their request;
+      you confirm it by comparing a 6-digit code. Trust lasts 8h unless you say otherwise
+      (--forever is meant for your own devices).
+  ocs lan join <key> [--addr <host:port>[,…]] [--label <name>]   the command inside that text
+  ocs lan approve <6-digit code> | reject       answer a request when \`pair\` has no terminal
+  ocs lan trust <peer> --once | --for <d> | --forever   change how long this machine trusts a peer
+  ocs lan pair --code … / ocs lan pair <code>   older one-time-code pairing (works with ocs 0.6/0.7)
   ocs lan status | peers | scan | who [<peer>] | unpair <peer> | down | autostart on|off
       Then: ocs dm <address>@<peer> <text>; ocs who --lan lists remote agents.`,
-  usage: "usage: ocs lan up|down|status|pair [<code>]|peers|scan|who [<peer>]|unpair <peer>|autostart on|off",
+  usage: "usage: ocs lan up|down|status|pair [<code>]|join <key>|approve <code>|reject|trust <peer>|peers|scan|who [<peer>]|unpair <peer>|autostart on|off",
   upStarted: (name, port, fp, discover) =>
     `lan: daemon up as ${name} on port ${port} (key ${fp})${discover ? "" : " — discovery off"}`,
   upAlready: (pid, port) => `lan: daemon already running (pid ${pid}, port ${port}); \`ocs lan down\` first to change settings`,
@@ -89,8 +124,60 @@ const en: LanCatalog = {
   statusIdentity: (fp) => `  this machine's key: ${fp}`,
   statusPeers: (count) => `  paired peers: ${count}`,
   statusOffers: (count) => `  open pairing codes: ${count}`,
-  peersNone: "lan: no paired peers — `ocs lan pair` on one machine, `ocs lan pair <code>` on the other",
-  peerLine: (label, name, fp, addr, lastSeen) => `  ${label}  (${name})  key ${fp}  ${addr}  last seen ${lastSeen}`,
+  peersNone: "lan: no paired peers — run `ocs lan pair` and send the printed text to the other person",
+  peerLine: (label, name, fp, addr, lastSeen, terms) => `  ${label}  (${name})  key ${fp}  ${addr}  last seen ${lastSeen}  trust: ${terms}`,
+  peersPruned: (labels) => `lan: trust expired and removed: ${labels}`,
+  peerExpired: (label) => `lan: trust for ${label} has expired — pair again (\`ocs lan pair\`) or extend it: \`ocs lan trust ${label} --for 8h\``,
+  termsForever: "permanent",
+  termsUntil: (span, at) => `${span} left (until ${at})`,
+  termsUses: (n) => `${n} message${n === 1 ? "" : "s"} left`,
+  termsJoin: ", ",
+  grantConflict: "lan: --forever cannot be combined with --once or --for",
+  badDuration: (value) => `lan: bad duration ${value} (want e.g. 30m, 8h, 7d; at least 1m, at most 366d)`,
+  trustUsage: "usage: ocs lan trust <peer> --once | --for <30m|8h|7d> | --forever",
+  trustUpdated: (label, terms) => `lan: ${label} is now trusted: ${terms}`,
+  trustLocalOnly: "  (this only changes how long this machine accepts it; the other side keeps its own limit)",
+  pairInvite: (i) => `Send the text between the lines to the person you are pairing with:
+
+──────── copy from here ────────
+Pair with me (${i.name}) in ocs so our agents can message each other. On your computer run:
+
+  # only if ocs is not installed yet — macOS / Linux:
+  ${INSTALL_SH}
+  # Windows PowerShell:
+  ${INSTALL_PS}
+
+  ocs lan up
+  ocs lan join ${i.target}${i.addrs.length > 0 ? ` --addr ${i.addrs.join(",")}` : ""}
+
+It prints a 6-digit code. Tell me the code; I will confirm it on my side.
+Trust: ${i.terms}. This invitation expires in ${i.minutes} min.
+──────── copy to here ────────
+`,
+  pairTermsLine: (terms) => `  trust: ${terms}`,
+  pairWaitingRequest: "waiting for a pairing request… (Ctrl+C cancels)",
+  pairRequestShown: (name, addr, sas, fp) =>
+    `\npairing request from ${name} (${addr}, key ${fp})\n  check code: ${sas}\n  Confirm only if the other person sees exactly this code on their screen.`,
+  pairAskConfirm: "  Same code? Allow pairing [y/N] ",
+  pairApproveHint: (sas) => `  To allow: ocs lan approve ${sas}    To refuse: ocs lan reject`,
+  pairRequestRejected: "request refused; still waiting for other requests",
+  pairRequestWithdrawn: "the request was withdrawn (it timed out or the other side gave up)",
+  decideNone: "lan: no pairing request is waiting (is `ocs lan pair` still running?)",
+  approveMismatch: (given) => `lan: no waiting request has check code ${given}; nothing was approved. If the codes differ, run \`ocs lan reject\`.`,
+  approveDone: (name) => `lan: approved ${name}; \`ocs lan pair\` will report when pairing completes`,
+  joinBadTarget: (target) => `lan: ${target} is not a pairing key (copy the \`ocs lan join …\` line from the pairing text as is)`,
+  joinDaemonHint: "  note: the LAN daemon is not running here — run `ocs lan up` too, or the other side cannot message you back",
+  joinShowSas: (serverName, sas) => `connected to ${serverName}. Check code:\n\n    ${sas}\n\nTell them this code and wait for them to confirm… (up to 75 s)`,
+  joinErrorHint: (code) => ({
+    "no-offer": "the other side is not waiting for a request — ask them to run `ocs lan pair` again",
+    busy: "another request is already waiting there — try again in a minute",
+    rejected: "the other side refused (the check codes did not match?)",
+    timeout: "nobody confirmed in time — ask them to confirm, then run the same command again",
+    cancelled: "the other side cancelled the invitation",
+    "old-peer": "the other side runs an older ocs — ask them to upgrade (`ocs upgrade`), or use `ocs lan pair --code` there",
+    "not-found": "no machine with that key answered — check the --addr in the text, and that `ocs lan up` runs there",
+    self: "that pairing text came from this machine",
+  } as Record<string, string>)[code] ?? null,
   pairNeedsDaemon: "lan: the daemon must be running to accept a pairing — run `ocs lan up` first",
   pairIssued: (code, minutes) =>
     `Pairing code (one use, expires in ${minutes} min):\n\n    ${code}\n\nOn the other machine run:\n\n    ocs lan pair ${code}\n\nAnyone who types this code can message your agents. Share it only with the machine you mean to pair.`,
@@ -135,7 +222,7 @@ const en: LanCatalog = {
   doctorHeader: "LAN (other computers)",
   doctorOff: "LAN mode is off (optional): reach agents on your other computers with `ocs lan up` + `ocs lan pair` — see docs/lan.md",
   doctorRunning: (name, port, peers) => `LAN daemon running as ${name} on port ${port}, ${peers} paired peer${peers === 1 ? "" : "s"}`,
-  doctorNoPeers: "no paired computers yet: `ocs lan pair` here, `ocs lan pair <code>` on the other one",
+  doctorNoPeers: "no paired computers yet: run `ocs lan pair` here and send the printed text to the other one",
   doctorAutostartOff: "LAN daemon will not come back after a restart: `ocs lan autostart on`",
   statusAutostart: (state) => `  start at login: ${state === "on" ? "on" : state === "stale" ? "stale (points at another ocs install — run `ocs lan autostart on`)" : "off (`ocs lan autostart on`)"}`,
 };
@@ -143,11 +230,16 @@ const en: LanCatalog = {
 const zh: LanCatalog = {
   help: `  ocs lan up [--port <n>] [--bind <ip>] [--name <名字>] [--no-discover | --discover]
       启动局域网守护进程（默认关闭）。只有配对过的机器能找到你的 agent
-  ocs lan pair [--label <名字>]            出一个一次性配对码（10 分钟有效）并等对方兑现
-  ocs lan pair <配对码> [--addr <host:port>] [--label <名字>]   在另一台机器上兑现配对码
+  ocs lan pair [--once] [--for <30m|8h|7d> | --forever] [--label <名字>]
+      打印一段配对文字发给对方，等对方发来请求；你核对 6 位核对码后确认。
+      默认信任 8 小时（--forever 留给自己的设备）
+  ocs lan join <公钥> [--addr <host:port>[,…]] [--label <名字>]   配对文字里的那条命令
+  ocs lan approve <6 位核对码> | reject        \`pair\` 没有终端可交互时用来确认 / 拒绝
+  ocs lan trust <对端> --once | --for <时长> | --forever   改本机对某个对端的信任期限
+  ocs lan pair --code … / ocs lan pair <配对码>  旧的一次性配对码方式（兼容 ocs 0.6/0.7）
   ocs lan status | peers | scan | who [<对端>] | unpair <对端> | down | autostart on|off
       之后：ocs dm <地址>@<对端> <内容>；ocs who --lan 列出远端 agent`,
-  usage: "用法: ocs lan up|down|status|pair [<配对码>]|peers|scan|who [<对端>]|unpair <对端>|autostart on|off",
+  usage: "用法: ocs lan up|down|status|pair [<配对码>]|join <公钥>|approve <核对码>|reject|trust <对端>|peers|scan|who [<对端>]|unpair <对端>|autostart on|off",
   upStarted: (name, port, fp, discover) =>
     `lan: 守护进程已启动，实例名 ${name}，端口 ${port}（公钥 ${fp}）${discover ? "" : "，局域网发现已关闭"}`,
   upAlready: (pid, port) => `lan: 守护进程已在运行（pid ${pid}，端口 ${port}）；要改设置先 \`ocs lan down\``,
@@ -163,8 +255,60 @@ const zh: LanCatalog = {
   statusIdentity: (fp) => `  本机公钥：${fp}`,
   statusPeers: (count) => `  已配对对端：${count}`,
   statusOffers: (count) => `  未兑现的配对码：${count}`,
-  peersNone: "lan: 还没有配对的对端——一台机器 `ocs lan pair`，另一台 `ocs lan pair <配对码>`",
-  peerLine: (label, name, fp, addr, lastSeen) => `  ${label}（${name}）  公钥 ${fp}  ${addr}  最近互通 ${lastSeen}`,
+  peersNone: "lan: 还没有配对的对端——运行 `ocs lan pair`，把打印出来的那段文字发给对方",
+  peerLine: (label, name, fp, addr, lastSeen, terms) => `  ${label}（${name}）  公钥 ${fp}  ${addr}  最近互通 ${lastSeen}  信任：${terms}`,
+  peersPruned: (labels) => `lan: 信任已到期，已移除：${labels}`,
+  peerExpired: (label) => `lan: 对 ${label} 的信任已到期——重新配对（\`ocs lan pair\`）或续期：\`ocs lan trust ${label} --for 8h\``,
+  termsForever: "长期",
+  termsUntil: (span, at) => `还剩 ${span}（到 ${at}）`,
+  termsUses: (n) => `还能收 ${n} 条消息`,
+  termsJoin: "，",
+  grantConflict: "lan: --forever 不能和 --once / --for 一起用",
+  badDuration: (value) => `lan: 时长不合法：${value}（例如 30m、8h、7d；最短 1m，最长 366d）`,
+  trustUsage: "用法: ocs lan trust <对端> --once | --for <30m|8h|7d> | --forever",
+  trustUpdated: (label, terms) => `lan: 现在对 ${label} 的信任：${terms}`,
+  trustLocalOnly: "  （只改本机接受它多久；对方那边的期限由对方自己决定）",
+  pairInvite: (i) => `把两条线之间的文字发给要配对的人：
+
+──────── 从这里复制 ────────
+和我（${i.name}）配对 ocs，让我们的 agent 能互相发消息。在你的电脑上运行：
+
+  # 还没装 ocs 才需要 — macOS / Linux：
+  ${INSTALL_SH}
+  # Windows PowerShell：
+  ${INSTALL_PS}
+
+  ocs lan up
+  ocs lan join ${i.target}${i.addrs.length > 0 ? ` --addr ${i.addrs.join(",")}` : ""}
+
+运行后会显示一个 6 位核对码，把它告诉我，我这边核对一致后确认。
+信任期限：${i.terms}。这份邀请 ${i.minutes} 分钟内有效。
+──────── 复制到这里 ────────
+`,
+  pairTermsLine: (terms) => `  信任期限：${terms}`,
+  pairWaitingRequest: "等待对方发来配对请求…（Ctrl+C 取消）",
+  pairRequestShown: (name, addr, sas, fp) =>
+    `\n收到 ${name}（${addr}，公钥 ${fp}）的配对请求\n  核对码：${sas}\n  只有对方屏幕上显示的是同一个核对码才确认。`,
+  pairAskConfirm: "  核对码一致？允许配对 [y/N] ",
+  pairApproveHint: (sas) => `  允许：ocs lan approve ${sas}    拒绝：ocs lan reject`,
+  pairRequestRejected: "已拒绝这个请求；继续等待其他请求",
+  pairRequestWithdrawn: "请求已撤回（超时，或对方放弃了）",
+  decideNone: "lan: 没有等待确认的配对请求（`ocs lan pair` 还在跑吗？）",
+  approveMismatch: (given) => `lan: 没有核对码为 ${given} 的请求，什么都没确认。核对码对不上的话请 \`ocs lan reject\`。`,
+  approveDone: (name) => `lan: 已允许 ${name}；配对完成时 \`ocs lan pair\` 那边会显示`,
+  joinBadTarget: (target) => `lan: ${target} 不是配对公钥（把配对文字里的 \`ocs lan join …\` 整行原样复制）`,
+  joinDaemonHint: "  提示：本机没跑局域网守护进程——也运行一下 `ocs lan up`，否则对方没法给你回消息",
+  joinShowSas: (serverName, sas) => `已连上 ${serverName}。核对码：\n\n    ${sas}\n\n把这 6 位数字告诉对方，等对方确认…（最多 75 秒）`,
+  joinErrorHint: (code) => ({
+    "no-offer": "对方没在等配对请求——请对方重新运行 `ocs lan pair`",
+    busy: "对方那边已经有一个请求在等确认——过一分钟再试",
+    rejected: "对方拒绝了（核对码对不上？）",
+    timeout: "对方没有及时确认——让对方确认后，再跑一次同一条命令",
+    cancelled: "对方取消了邀请",
+    "old-peer": "对方的 ocs 版本太旧——请对方升级（`ocs upgrade`），或在对方那边用 `ocs lan pair --code`",
+    "not-found": "没有找到这个公钥的机器——检查文字里的 --addr，以及对方是否在跑 `ocs lan up`",
+    self: "这段配对文字就是本机发出的",
+  } as Record<string, string>)[code] ?? null,
   pairNeedsDaemon: "lan: 接受配对需要守护进程在运行——先 `ocs lan up`",
   pairIssued: (code, minutes) =>
     `配对码（一次性，${minutes} 分钟内有效）：\n\n    ${code}\n\n在另一台机器上执行：\n\n    ocs lan pair ${code}\n\n拿到这个码的人就能给你的 agent 发消息。只发给你要配对的那台机器。`,
@@ -209,7 +353,7 @@ const zh: LanCatalog = {
   doctorHeader: "局域网（其他电脑）",
   doctorOff: "局域网模式未开启（可选）：`ocs lan up` + `ocs lan pair` 就能找到你其他电脑上的 agent，见 docs/lan.md",
   doctorRunning: (name, port, peers) => `局域网守护进程运行中：${name}，端口 ${port}，已配对 ${peers} 台电脑`,
-  doctorNoPeers: "还没有配对的电脑：这台跑 `ocs lan pair`，另一台跑 `ocs lan pair <配对码>`",
+  doctorNoPeers: "还没有配对的电脑：这台跑 `ocs lan pair`，把打印出来的文字发给另一台",
   doctorAutostartOff: "重启后局域网守护进程不会自动回来：`ocs lan autostart on`",
   statusAutostart: (state) => `  登录自启：${state === "on" ? "开" : state === "stale" ? "失效（指向别处的 ocs，重跑 `ocs lan autostart on`）" : "关（`ocs lan autostart on`）"}`,
 };

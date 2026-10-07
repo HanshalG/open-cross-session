@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.0
+
+**Pairing two people is copy, paste, compare six digits — and trust now runs out.**
+
+- `ocs lan pair` prints a ready-to-send block (install lines, `ocs lan up`, `ocs lan join <key> --addr …`). The other person pastes it; both screens show the same 6-digit check code; you answer `y`. Without a terminal (e.g. an agent ran it), approve with `ocs lan approve <code>` or refuse with `ocs lan reject`
+- The copied text pins 100 bits of the inviter's key fingerprint, so `join` cannot be steered to an impostor; the check code (derived from that connection's keys) stops someone else slipping in a request. Requests are only accepted while `ocs lan pair` is waiting, one at a time
+- Trust periods: pairing grants **8 hours by default**; `--for 30m|2h|7d`, `--once` (a single message, combinable with `--for`), `--forever` (meant for your own devices). Both sides record the same period; expired or used-up peers are refused at the handshake and pruned. A `--once` use is only taken by a DM that is actually stored, so a typo does not burn it
+- `ocs lan trust <peer> --once | --for <d> | --forever` changes this machine's period later; `ocs lan peers` shows each peer's remaining time / messages
+- Compatibility: peers paired before 0.8 stay permanent. The one-time code flow still works (`ocs lan pair --code` / `ocs lan pair <code>`) and is what 0.6/0.7 machines understand; a 0.8 `join` against a 0.7 daemon reports `old-peer`
+- Verified: unit + end-to-end tests (two daemons over real TCP, non-TTY approve), and the interactive `[y/N]` path under a real pty in English and Chinese. Not yet verified across two physical machines
+
 ## 0.7.6
 
 - `ocs upgrade --party`（旧入口）补上 Agent Party 的关停日期（2026-10-31）和卸载本机 Agent Party 的指南链接；仍然只指向 `ocs lan`，不引导迁回 Agent Party

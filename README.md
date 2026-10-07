@@ -17,7 +17,8 @@ https://github.com/user-attachments/assets/4c86fd18-f935-467b-ac23-5283d40bb63d
 ```bash
 # machine A                         # machine B
 ocs lan up                          ocs lan up
-ocs lan pair   # prints a code  →   ocs lan pair 7K2M-9QXD-…
+ocs lan pair   # prints a text  →   (paste it) ocs lan join k3m9q2xa… --addr …
+# compare the 6-digit code, y  ←    shows the same 6-digit code
                                     ocs who --lan
                                     ocs dm claude-1a2b3c4d@mini "can you run the Windows build?"
 ```
@@ -26,7 +27,8 @@ The session on A wakes with the message and a `Reply:` line that routes straight
 (Claude Code 2.1 and ChatGPT Desktop Codex on both sides).
 
 - **Finds each other** on the LAN (multicast + subnet broadcast); `--addr` when the network blocks both.
-- **Pair once, no trust-on-first-use:** the one-time code carries the issuer's key fingerprint.
+- **Pairing by copy-paste, no trust-on-first-use:** `ocs lan pair` prints a ready-to-send text carrying its key fingerprint; you approve the other side after both screens show the same 6-digit code.
+- **Trust that runs out:** 8 hours by default, `--once` for a single message, `--forever` for your own devices.
 - **Mutually authenticated and encrypted:** Ed25519 identities, signed X25519 handshake, AES-256-GCM, forward secrecy.
   Unpaired machines can only redeem a live code — nothing else.
 - **Off by default.** `ocs lan up` starts it; `ocs lan autostart on` keeps it across logins.
@@ -291,14 +293,22 @@ Pair two machines once, then address a remote agent as `<address>@<peer>`:
 ```bash
 # machine A ("mini")
 ocs lan up                  # start the LAN daemon (off until you do this)
-ocs lan pair                # prints a one-time code, waits up to 10 minutes
+ocs lan pair                # prints a text to send to B, then waits up to 10 minutes
 
-# machine B
+# machine B — run the lines from that text
 ocs lan up
-ocs lan pair 7K2M-9QXD-…    # finds A on the LAN; if multicast is blocked add --addr <A-ip>:47890
+ocs lan join k3m9q2xa7bfw4ndcuy2e --addr 192.168.1.20:47890
+                            # shows a 6-digit check code; A sees the same code and answers y
 ocs who --lan               # agents on A: claude-1a2b3c4d@mini  claude  idle  …
 ocs dm claude-1a2b3c4d@mini "can you look at the CI failure?"
 ```
+
+Trust is temporary unless you say otherwise: `ocs lan pair` grants 8 hours, `--for 30m|2h|7d`
+picks another period, `--once` allows a single message, and `--forever` is meant for your own
+devices. Both sides get the same period; expired peers are refused and dropped.
+`ocs lan trust <peer> --for 8h | --forever` changes it later on this side.
+Without a terminal (e.g. an agent ran `ocs lan pair`), approve with `ocs lan approve <code>`.
+Peers on ocs 0.6/0.7 can still pair with the old one-time code: `ocs lan pair --code` there or here.
 
 The woken session on A sees the sender as `claude-9f8e7d6c@<label>` and a `Reply:` line
 that routes straight back. `ocs lan status | peers | scan | who | unpair <peer> | down`
@@ -307,10 +317,11 @@ other without a human clicking "deliver" on every message, the receiving Claude 
 `crossSessionInbound: accept` (`ocs doctor --fix`) — otherwise held messages drop after 5 minutes.
 Windows specifics (named-pipe inbox, firewall rule): [docs/lan.md](./docs/lan.md#windows).
 
-Security, in short: every machine has an Ed25519 key; pairing binds the issuer's key
-fingerprint into the code, so there is no trust-on-first-use; each connection runs a
-signed X25519 handshake with forward secrecy and AES-256-GCM; unpaired machines can only
-redeem a live code. **Pairing means "this machine may prompt my agents"** — the same
+Security, in short: every machine has an Ed25519 key; the pairing text pins the inviting
+machine's key fingerprint, and the inviting side approves the requester only after both
+screens show the same 6-digit code derived from that connection's keys, so there is no
+trust-on-first-use; each connection runs a signed X25519 handshake with forward secrecy and
+AES-256-GCM; unpaired machines can only send a pairing request while someone is waiting for one. **Pairing means "this machine may prompt my agents"** — the same
 power a local session has. Discovery replies reveal only an instance name, port, and key
 fingerprint. Full protocol and threat model: [docs/lan.md](./docs/lan.md).
 
@@ -322,8 +333,8 @@ or a company VPN — with no change to ocs. Multicast discovery usually does not
 these networks, so pair by address:
 
 ```bash
-# machine B, after A ran `ocs lan pair`
-ocs lan pair 7K2M-9QXD-… --addr 100.64.0.7:47890   # A's VPN address
+# machine B, after A ran `ocs lan pair` — the key from A's text, A's VPN address
+ocs lan join k3m9q2xa7bfw4ndcuy2e --addr 100.64.0.7:47890
 ```
 
 The trust store remembers the address; reconnects need no discovery. Pairing across

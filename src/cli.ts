@@ -127,7 +127,7 @@ import {
   upgradeCheckEnabled,
 } from "./upgrade.ts";
 
-export const OCS_VERSION = "0.7.6";
+export const OCS_VERSION = "0.8.0";
 
 const LANG = detectLang();
 const M = messages(LANG);
@@ -167,8 +167,8 @@ const COMMAND_SPECS: Record<string, CommandSpec> = {
   [CODEX_WAKE_WATCH_COMMAND]: { value: [], bool: [], minPos: 2, maxPos: 2 },
   who: { value: [], bool: ["json", "verbose", "lan"], minPos: 0, maxPos: 0 },
   lan: {
-    value: ["port", "bind", "name", "addr", "label"],
-    bool: ["json", "no-discover", "discover"],
+    value: ["port", "bind", "name", "addr", "label", "for"],
+    bool: ["json", "no-discover", "discover", "once", "forever", "code"],
     minPos: 0,
     maxPos: 3,
   },
@@ -1404,8 +1404,11 @@ ocs dm <address>@<peer> "<text>" # message + wake an agent on a paired machine
   DM names; \`ocs read <channel>\` advances the same stable cursor.
 - LAN (opt-in): \`<address>@<peer>\` reaches an agent on another machine the user paired
   with \`ocs lan pair\`. A wake note from such a sender shows \`x@peer\` and its \`Reply:\` line
-  already routes back. Only run \`ocs lan up\` / \`ocs lan pair\` when the user asks: pairing lets
-  that machine prompt this machine's agents. Never pass a pairing code on to anyone else.
+  already routes back. Only run \`ocs lan up\` / \`ocs lan pair\` / \`ocs lan join\` when the user asks:
+  pairing lets that machine prompt this machine's agents. Trust is temporary by default (8h);
+  use \`--forever\` only when the user says the other machine is their own. Never run
+  \`ocs lan approve\` on your own judgement — only with the exact 6-digit code the user says they
+  compared with the other person. Never pass a pairing code or pairing text on to anyone else.
 - \`ocs doctor --fix\` is the one-step setup repair: it refreshes the Claude,
   Codex, and Pi skills, repairs the Pi extension and local data permissions,
   and backs up Claude settings before enabling direct delivery.

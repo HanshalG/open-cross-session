@@ -179,6 +179,25 @@ export function decodePairingCode(code: string): { fpPrefix: Buffer; token: Buff
   return { fpPrefix: raw.subarray(0, PAIR_FP_PREFIX_BYTES), token: raw.subarray(PAIR_FP_PREFIX_BYTES) };
 }
 
+/**
+ * 6-digit check code (SAS), computed independently by both ends from this handshake's
+ * transcript hash, the c2s session key and both long-term keys. The requester pins the
+ * server's key prefix, so nobody in the middle can pose as the server; the code guards the
+ * other direction — someone else slipping in a request as the requester. If the number on
+ * the server's screen differs from the requester's, the human must not approve.
+ */
+export function sasCode(keys: { transcript: Buffer; c2s: Buffer }, serverKey: Buffer, clientKey: Buffer): string {
+  const digest = createHash("sha256")
+    .update(`${LAN_PROTO}\0sas\0`)
+    .update(keys.transcript).update(keys.c2s).update(serverKey).update(clientKey)
+    .digest();
+  return String(digest.readUInt32BE(0) % 1_000_000).padStart(6, "0");
+}
+
+export function formatSas(sas: string): string {
+  return `${sas.slice(0, 3)} ${sas.slice(3)}`;
+}
+
 export function tokenDigest(token: Buffer): string {
   return createHash("sha256").update("ocs-lan/1 pair token\0").update(token).digest("hex");
 }

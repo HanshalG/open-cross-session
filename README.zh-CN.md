@@ -17,7 +17,8 @@ https://github.com/user-attachments/assets/6fedd0cc-af15-4caf-9027-d0f149676ea6
 ```bash
 # 机器 A                             # 机器 B
 ocs lan up                          ocs lan up
-ocs lan pair   # 打印配对码    →    ocs lan pair 7K2M-9QXD-…
+ocs lan pair   # 打印配对文字  →    （粘贴执行）ocs lan join k3m9q2xa… --addr …
+# 核对 6 位核对码，按 y     ←       显示同一个 6 位核对码
                                     ocs who --lan
                                     ocs dm claude-1a2b3c4d@mini "帮我在 Windows 上跑一下构建"
 ```
@@ -26,8 +27,9 @@ A 上的会话被唤醒，收到消息和一行 `回复：`，照着执行就回
 Claude Code 2.1 和 ChatGPT Desktop 的 Codex）。
 
 - **自动发现**：局域网组播 + 子网广播；网络两者都屏蔽时用 `--addr`。
-- **配对一次，不存在「首次连接即信任」**：一次性配对码里带着发码方的公钥指纹。
-- **双向认证、全程加密**：Ed25519 身份、带签名的 X25519 握手、AES-256-GCM、前向保密。未配对的机器除了兑现一个有效配对码，什么都做不了。
+- **复制粘贴就能配对，不存在「首次连接即信任」**：`ocs lan pair` 打印一段可以直接发给对方的文字，里面带着本机公钥指纹；两边屏幕显示同一个 6 位核对码后，你再确认。
+- **信任会到期**：默认 8 小时，`--once` 只许一条消息，`--forever` 留给自己的设备。
+- **双向认证、全程加密**：Ed25519 身份、带签名的 X25519 握手、AES-256-GCM、前向保密。未配对的机器只能在你等待配对时发一个请求，别的什么都做不了。
 - **默认关闭**：`ocs lan up` 才开启，`ocs lan autostart on` 让它登录后自动起。
 
 协议与威胁模型见 [docs/lan.md](./docs/lan.md)，配置细节见[跨机器](#跨机器)。
@@ -250,14 +252,20 @@ v0.3.4 之前的历史可用 `--inherit` 绑定一次；工作区不唯一、旧
 ```bash
 # 机器 A（mini）
 ocs lan up                  # 启动局域网守护进程（不跑这句就没有任何监听）
-ocs lan pair                # 打印一次性配对码，最多等 10 分钟
+ocs lan pair                # 打印一段发给 B 的文字，最多等 10 分钟
 
-# 机器 B
+# 机器 B —— 执行那段文字里的命令
 ocs lan up
-ocs lan pair 7K2M-9QXD-…    # 在局域网里找到 A；组播被屏蔽时加 --addr <A的IP>:47890
+ocs lan join k3m9q2xa7bfw4ndcuy2e --addr 192.168.1.20:47890
+                            # 显示 6 位核对码；A 那边看到同一个码，按 y 确认
 ocs who --lan               # A 上的 agent：claude-1a2b3c4d@mini  claude  idle  …
 ocs dm claude-1a2b3c4d@mini "帮我看下 CI 为什么挂了"
 ```
+
+信任默认是临时的：`ocs lan pair` 给 8 小时，`--for 30m|2h|7d` 换个时长，`--once` 只许一条消息，
+`--forever` 留给自己的设备。两边按同一个期限互信，到期的对端会被拒绝并清掉；之后可以用
+`ocs lan trust <对端> --for 8h | --forever` 改本机这边的期限。没有终端可交互时（比如 agent 跑的 `ocs lan pair`），
+用 `ocs lan approve <核对码>` 确认。对方还是 ocs 0.6/0.7 的话，仍可用旧的一次性配对码：`ocs lan pair --code`。
 
 A 上被唤醒的会话看到发送者是 `claude-9f8e7d6c@<label>`，`Reply:` 行直接回到 B。
 `ocs lan status | peers | scan | who | unpair <对端> | down` 管理配对和守护进程，
@@ -265,9 +273,10 @@ A 上被唤醒的会话看到发送者是 `claude-9f8e7d6c@<label>`，`Reply:` �
 接收方 Claude 要设 `crossSessionInbound: accept`（`ocs doctor --fix`），否则被扣住的消息 5 分钟后就丢了。
 Windows 的注意事项（命名管道收件箱、防火墙规则）见 [docs/lan.md](./docs/lan.md#windows)。
 
-安全要点：每台机器一把 Ed25519 身份密钥；配对码里带着发码方公钥指纹，不存在「首次连接即信任」；
-每次连接都是带签名的 X25519 握手（前向保密）+ AES-256-GCM；未配对的机器除了兑现一个有效配对码，
-什么都做不了。**配对等于允许那台机器给你的 agent 下提示**，和本机另一个会话的权限一样。
+安全要点：每台机器一把 Ed25519 身份密钥；配对文字钉死发起方的公钥指纹，发起方要等两边屏幕显示
+同一个由这次连接密钥算出的 6 位核对码才确认，不存在「首次连接即信任」；
+每次连接都是带签名的 X25519 握手（前向保密）+ AES-256-GCM；未配对的机器只能在有人等待配对时发一个请求，
+别的什么都做不了。**配对等于允许那台机器给你的 agent 下提示**，和本机另一个会话的权限一样。
 局域网发现的应答只包含实例名、端口和公钥指纹。完整协议与威胁模型见 [docs/lan.md](./docs/lan.md)。
 
 ### 不同网络：虚拟局域网
@@ -275,8 +284,8 @@ Windows 的注意事项（命名管道收件箱、防火墙规则）见 [docs/la
 `ocs lan` 只要求两台机器能连上对方的 TCP 47890 端口。不在同一个网络的机器，接入同一个虚拟局域网（Tailscale、WireGuard、ZeroTier 或公司 VPN）就满足了，ocs 不用做任何改动。这类网络一般不转发组播，局域网发现找不到对方，所以按地址配对：
 
 ```bash
-# 机器 B，A 已经跑了 `ocs lan pair`
-ocs lan pair 7K2M-9QXD-… --addr 100.64.0.7:47890   # A 的 VPN 地址
+# 机器 B，A 已经跑了 `ocs lan pair`——公钥取自 A 发来的文字，地址用 A 的 VPN 地址
+ocs lan join k3m9q2xa7bfw4ndcuy2e --addr 100.64.0.7:47890
 ```
 
 信任库会记住地址，之后重连不再依赖发现。跨网段、只按地址（不靠组播）配对已在 macOS 和 Windows 之间实测；Tailscale、WireGuard 本身还不在测试矩阵里。建议走 VPN，不要把 47890 端口直接开到公网：协议本身双向认证加密，但走 VPN 端口根本不暴露在公网上。

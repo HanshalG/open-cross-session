@@ -5,13 +5,14 @@ Claude / Codex / Pi 会话发消息并唤醒它，`ocs who --lan` 列出对端�
 默认关闭，`ocs lan up` 才开。
 
 ```bash
-# 机器 A（例如 mini）
+# machine A (e.g. mini)
 ocs lan up
-ocs lan pair                 # 打印一次性配对码，等待兑现
+ocs lan pair                 # prints a text to send to B, waits for B's request
 
-# 机器 B（例如 laptop）
+# machine B (e.g. laptop) — the lines from A's text
 ocs lan up
-ocs lan pair 7K2M-…          # 兑现；局域网发现找到 A，屏蔽组播的网络加 --addr <A-ip>:47890
+ocs lan join k3m9q2xa7bfw4ndcuy2e --addr 192.168.1.20:47890
+                             # shows a 6-digit check code; A sees the same code and answers y
 ocs who --lan                # A 上的 agent：claude-1a2b3c4d@mini …
 ocs dm claude-1a2b3c4d@mini "帮我看下 CI"
 ```
@@ -41,6 +42,10 @@ A 那边被唤醒的会话看到发送者是 `claude-9f8e7d6c@laptop`，`Reply:`
 | 篡改 / 重放 / 删帧 / 调序 / 反射 | GCM 隐式计数器（不上线）、按方向分钥、方向写进 AAD |
 | 截获配对码后抢先兑现、或冒名发码方 | 码里含发码方公钥指纹前 64 位，客户端先核对再发令牌；令牌一次性、10 分钟过期 |
 | 猜配对码 | 56 位令牌只能在线猜；所有开着的邀请累计 5 次错码即作废 |
+| Impostor answers a `join` (0.8+) | The pairing text carries 100 bits of the inviter's fingerprint; the requester pins it in the handshake and sends neither its identity nor the request on mismatch |
+| Stranger slips in a pairing request (0.8+) | Requests are only accepted while `ocs lan pair` is waiting, one at a time; the inviter's human must see the same 6-digit check code (derived from that connection's transcript and session key) as the requester before trusting it |
+| Stranger pops prompts on an idle machine (0.8+) | No open invitation → immediate `no-offer`; request rate shares the 10/min/IP pairing limit |
+| Trust outlives its purpose (0.8+) | Pairing grants 8 h by default (`--once`, `--for`, `--forever`); expired or used-up peers are unpaired at the handshake and pruned on the next trust-store write |
 | 远端冒充本机会话名 | 发送者一律显示 `<对方地址>@<本机给对端起的 label>`，label 远端改不了 |
 | 正文闭合包装标签、伪造 `Reply:` 行 | 唤醒 note 里正文的 `<cross-session-message` 被中和成 `‹…`，行首形似 `Reply:` / `Thread:` / 唤醒首行的加 `> `（wake-protocol §1）；Codex queue / Pi / cmux 这类没有包装的载体同样生效 |
 | 远端随手造频道塞满磁盘 | 远端 DM 只投活目标（Claude 活会话或登记过的 ocs 名字；Codex 要有活进程持有 rollout；Pi 要有活登记；Hermes 要宿主此刻列为打开），其余 `not-found` 不落盘；每对端限速 30 条突发、0.5 条/秒，且每 UTC 日正文 ≤16 MiB |
@@ -88,7 +93,8 @@ S → C  应答 {ok, …}                                             AEAD s2c #
 | `ping` | 已配对 | — | `{ok, name}` |
 | `who` | 已配对 | — | `{ok, name, entries:[{address, kind, status?, label?}]}` |
 | `dm` | 已配对 | `{from, from_key, to, body, lang}` | `{ok, channel, seq, to_key, to_display, outcome, lines}` 或 `{ok:false, error}` |
-| `pair` | 任何人 | `{token, name}` | `{ok, name}` 或 `{ok:false, error}` |
+| `pair` | 任何人 | `{token, name}` | `{ok, name, expires_at?, uses?}` 或 `{ok:false, error}` |
+| `pair-request` (0.8+) | anyone, only while an approve invitation is open | `{name}` | after the human decides (≤75 s): `{ok, name, expires_at?, uses?}` or `{ok:false, error}` with `no-offer` / `busy` / `rejected` / `timeout` / `cancelled` |
 
 `from` 是对方回复用的地址（ocs 名字优先，否则短 id），`from_key` 是不随改名变的短 id。
 `outcome` 是远端唤醒阶梯的总体结果（`ok` / `failed` / `unknown`），映射到发送方退出码 0 / 2 / 3，
@@ -123,6 +129,50 @@ Crockford base32(指纹摘要前 8 字节 ‖ 7 字节随机令牌)，24 字符�
 一把 SHA-256 前 64 位相同的 Ed25519 钥匙；令牌只在已认证发码方的加密通道里发出，被动窃听拿不到。
 
 `--label` 设本机给对端起的名字（`x@<label>` 里那段），缺省用对方自报的实例名，重名自动加 `-2`。
+
+## Pairing by request (0.8+)
+
+`ocs lan pair` (daemon running) opens an *approve* invitation and prints a block meant to be
+copied into a chat: install lines, `ocs lan up`, and `ocs lan join <key> --addr <ip:port>,…`.
+`<key>` is the first 20 base32 characters (100 bits) of the inviter's fingerprint; `--addr` lists
+the inviter's non-link-local IPv4 addresses, and the joiner falls back to discovery filtered by
+the same prefix.
+
+`ocs lan join` connects with the prefix pinned (`peer-key-mismatch` → nothing sent), prints the
+6-digit check code and sends `pair-request`. Both ends compute the code independently:
+
+```
+sas = u32be(SHA-256("ocs-lan/1\0sas\0" ‖ th ‖ c2s ‖ key_s ‖ key_c)[0..4]) mod 10^6
+```
+
+The daemon attaches the request to the open invitation (`$OCS_HOME/lan/offers/<id>.json`,
+`request` field; a second one gets `busy`) and polls for a `decision`. The waiting `ocs lan pair`
+shows requester name, address, short fingerprint and code, and asks `[y/N]` on a TTY; without a
+TTY it prints `ocs lan approve <code>` / `ocs lan reject`, and `approve` only matches a request
+with exactly that code. On approval the daemon writes the trust store and marks the invitation
+paired under the offers lock (same as code redemption); refusal or the 75 s timeout detaches
+the request and leaves the invitation open. The joiner trusts the inviter only after an `ok`
+reply, for the period in that reply.
+
+Code invitations (`ocs lan pair --code`) still work and are what 0.6/0.7 peers understand. The
+two kinds do not cross: tokens never redeem an approve invitation, and requests never attach to
+a code invitation. A 0.7 daemon answers `pair-request` with `unpaired`; the joiner reports that
+as `old-peer`.
+
+## Trust periods (0.8+)
+
+`peers.json` entries may carry `expires_at` (ISO time) and `uses_left` (DMs still accepted).
+Absent means permanent, which is what every pre-0.8 entry is. The inviter picks the period —
+default 8 h, `--for 30m|8h|7d`, `--once` (1 DM, combinable with `--for`), `--forever` — and
+returns it in the pairing reply so the joiner trusts it back for the same period.
+
+- An inactive peer (expired, or `uses_left` 0) is `paired:false` at the handshake, so `who` and
+  `dm` get `unpaired`; locally, `ocs dm x@peer` refuses before connecting.
+- A use is taken only right before a DM is stored for a live target (atomic, under the peers
+  lock), so a mistyped address does not burn a `--once` grant. The DM taking the last use goes
+  through.
+- Every trust-store write drops inactive entries; `ocs lan peers` prunes and reports them.
+- `ocs lan trust <peer> --once | --for <d> | --forever` rewrites this machine's period only.
 
 ## 发现
 

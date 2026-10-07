@@ -10,8 +10,10 @@ import {
   liveDaemonState,
   loadLanConfig,
   notePeerAddress,
+  PAIR_REQUEST_WAIT_MS,
   trustPeer,
   type LanPeer,
+  type PeerTerms,
 } from "./lan-store.ts";
 import { connectSecure, parseHostPort, type ClientConnection, type ServerExpectation } from "./lan-wire.ts";
 import type { LanWhoEntry } from "./lan-daemon.ts";
@@ -146,6 +148,75 @@ export async function pairWithCode(
     name: typeof reply.name === "string" ? reply.name : hit.conn.serverName,
     ...(options.label === undefined ? {} : { label: options.label }),
     addr: hit.addr,
+    terms: replyTerms(reply),
+  }, env);
+  return { peer, addr: hit.addr };
+}
+
+/**
+ * The period the other side granted us; we trust it back for the same period (if it only
+ * gives us 8 hours, we should not stay open to it for longer). Invalid or missing fields
+ * (0.7 peers send none) mean permanent, which is what older versions did.
+ */
+export function replyTerms(reply: Record<string, unknown>, now = Date.now()): PeerTerms {
+  const expires = typeof reply.expires_at === "string" ? Date.parse(reply.expires_at) : Number.NaN;
+  const uses = reply.uses;
+  return {
+    ...(Number.isFinite(expires) && expires > now ? { expires_at: new Date(expires).toISOString() } : {}),
+    ...(Number.isInteger(uses) && (uses as number) > 0 && (uses as number) <= 1000 ? { uses_left: uses as number } : {}),
+  };
+}
+
+/** Key prefix in the copied pairing text: lowercase base32, at least 16 chars (80 bits). */
+export const PAIR_TARGET_RE = /^[a-z2-7]{16,52}$/;
+
+/**
+ * Pair by request (0.8+): the other side ran `ocs lan pair` and sent us a text with its key
+ * prefix and addresses. The prefix is pinned during the handshake (no match → our identity is
+ * never sent); once connected, the 6-digit check code goes to `onSas` for display, then we
+ * send pair-request and wait for their human to compare codes and confirm.
+ */
+export async function pairByRequest(
+  target: string,
+  identity: LanIdentity,
+  options: { addrs?: string[]; label?: string; scanTimeoutMs?: number; onSas?: (sas: string, serverName: string) => void },
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<PairJoinResult> {
+  const prefix = target.toLowerCase();
+  if (!PAIR_TARGET_RE.test(prefix)) throw new LanClientError("bad-target", `bad pairing target ${target}`);
+  if (identity.fingerprint.startsWith(prefix)) throw new LanClientError("self", "that is this machine's own key");
+  const given = options.addrs ?? [];
+  for (const addr of given) {
+    if (parseHostPort(addr) === null) throw new LanClientError("bad-addr", `bad address ${addr} (want host:port)`);
+  }
+  const expect: ServerExpectation = { kind: "fp-prefix", prefix };
+  const mismatches: string[] = [];
+  let hit = await tryConnect(given, identity, expect, env, mismatches);
+  if (hit === null) {
+    const found = await scanLan({ timeoutMs: options.scanTimeoutMs ?? 2000 }, env);
+    const candidates = found
+      .filter((instance) => instance.fingerprint.startsWith(prefix))
+      .map((instance) => `${instance.host}:${instance.port}`)
+      .filter((addr) => !given.includes(addr))
+      .slice(0, 4);
+    hit = await tryConnect(candidates, identity, expect, env, mismatches);
+  }
+  if (hit === null) {
+    throw new LanClientError(mismatches.length > 0 ? "key-mismatch" : "not-found", "could not reach the machine that sent the pairing text", mismatches);
+  }
+  options.onSas?.(hit.conn.sas, cleanText(hit.conn.serverName, 64));
+  const reply = await request(hit.conn, { op: "pair-request", name: loadLanConfig(env).name }, PAIR_REQUEST_WAIT_MS + 15_000);
+  if (reply.ok !== true) {
+    // A 0.7 daemon does not know pair-request and answers it like any unpaired request.
+    const code = reply.error === "unpaired" ? "old-peer" : typeof reply.error === "string" && /^[a-z-]{1,32}$/.test(reply.error) ? reply.error : "failed";
+    throw new LanClientError(code, `pairing refused: ${code}`);
+  }
+  const peer = trustPeer({
+    key: hit.conn.serverKey,
+    name: typeof reply.name === "string" ? reply.name : hit.conn.serverName,
+    ...(options.label === undefined ? {} : { label: options.label }),
+    addr: hit.addr,
+    terms: replyTerms(reply),
   }, env);
   return { peer, addr: hit.addr };
 }

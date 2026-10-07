@@ -11,6 +11,7 @@ import {
   fingerprintOf,
   LanProtocolError,
   respondServerHandshake,
+  sasCode,
   startClientHandshake,
   type LanIdentity,
 } from "./lan-crypto.ts";
@@ -152,7 +153,9 @@ export class SecureChannel {
 /** 客户端对服务端公钥的期望：已配对 → 钉死完整指纹；配对中 → 配对码里的指纹前缀。 */
 export type ServerExpectation =
   | { kind: "fingerprint"; fingerprint: string }
-  | { kind: "prefix"; prefix: Buffer };
+  | { kind: "prefix"; prefix: Buffer }
+  /** Pairing by request: the key prefix from the copied text (base32, ≥16 chars = 80 bits). */
+  | { kind: "fp-prefix"; prefix: string };
 
 export interface ClientConnection {
   channel: SecureChannel;
@@ -160,6 +163,8 @@ export interface ClientConnection {
   serverFingerprint: string;
   paired: boolean;
   serverName: string;
+  /** This handshake's 6-digit check code (the server derives the same one). */
+  sas: string;
 }
 
 export function parseHostPort(addr: string): { host: string; port: number } | null {
@@ -208,7 +213,9 @@ export async function connectSecure(
     const serverFingerprint = fingerprintOf(serverKey);
     const matches = expect.kind === "fingerprint"
       ? serverFingerprint === expect.fingerprint
-      : fingerprintDigest(serverKey).subarray(0, expect.prefix.length).equals(expect.prefix);
+      : expect.kind === "fp-prefix"
+        ? serverFingerprint.startsWith(expect.prefix)
+        : fingerprintDigest(serverKey).subarray(0, expect.prefix.length).equals(expect.prefix);
     if (!matches) {
       throw new LanProtocolError("peer-key-mismatch", `peer at ${addr.host}:${addr.port} presented key ${serverFingerprint}`);
     }
@@ -223,6 +230,7 @@ export async function connectSecure(
       serverFingerprint,
       paired: welcome.paired === true,
       serverName: typeof welcome.name === "string" ? welcome.name.slice(0, 64) : "?",
+      sas: sasCode(keys, serverKey, identity.publicKey),
     };
   } catch (error) {
     socket.destroy();
@@ -237,6 +245,7 @@ export interface AcceptedConnection {
   clientKey: Buffer;
   clientFingerprint: string;
   clientPort: number | null;
+  sas: string;
 }
 
 /**
@@ -258,5 +267,5 @@ export async function acceptSecure(
   // 只有已配对的对端才放开到 1 MiB；未配对的只可能发一条很小的 pair 请求。
   reader.maxFrame = paired ? RECORD_FRAME_MAX : HANDSHAKE_FRAME_MAX;
   channel.send({ t: "welcome", paired, name });
-  return { channel, clientKey, clientFingerprint, clientPort: port };
+  return { channel, clientKey, clientFingerprint, clientPort: port, sas: sasCode(hs.keys, identity.publicKey, clientKey) };
 }

@@ -6,14 +6,24 @@ import { spawnDetached } from "./detach.ts";
 import { readFileSync } from "node:fs";
 import type { Lang } from "./i18n.ts";
 import { lanMessages } from "./i18n-lan.ts";
-import { encodePairingCode, fingerprintDigest, shortFingerprint, type LanIdentity } from "./lan-crypto.ts";
+import { encodePairingCode, fingerprintDigest, formatSas, shortFingerprint, type LanIdentity } from "./lan-crypto.ts";
 import { lanChannel, LAN_DAEMON_COMMAND, LAN_DAEMON_ENV_STRIP } from "./lan-daemon.ts";
 import { autostartPlan, autostartState, disableAutostart, enableAutostart } from "./lan-autostart.ts";
 import { localIpv4Addresses, scanLan } from "./lan-discovery.ts";
-import { LanClientError, pairWithCode, remoteWho, sendRemoteDm } from "./lan-client.ts";
+import { LanClientError, pairByRequest, pairWithCode, PAIR_TARGET_RE, remoteWho, sendRemoteDm } from "./lan-client.ts";
 import {
+  activePeers,
   clearDaemonState,
   createPairOffer,
+  decidePairRequest,
+  DEFAULT_PEER_GRANT,
+  grantTerms,
+  peerActive,
+  pruneExpiredPeers,
+  setPeerTerms,
+  type PairOffer,
+  type PeerGrant,
+  type PeerTerms,
   daemonLogPath,
   closePairOffer,
   findPeer,
@@ -62,10 +72,62 @@ function identity(ctx: LanCliContext): LanIdentity {
   return guarded(ctx, () => loadOrCreateIdentity());
 }
 
-function requirePeer(ctx: LanCliContext, query: string): LanPeer {
+function requirePeer(ctx: LanCliContext, query: string, options: { allowExpired?: boolean } = {}): LanPeer {
   const peer = guarded(ctx, () => findPeer(query));
   if (peer === null) ctx.fail(lanMessages(ctx.lang).peerNotFound(query));
+  if (options.allowExpired !== true && !peerActive(peer)) ctx.fail(lanMessages(ctx.lang).peerExpired(peer.label));
   return peer;
+}
+
+const DURATION_RE = /^(\d{1,4})(m|h|d)$/;
+const DURATION_UNIT_MS = { m: 60_000, h: 3_600_000, d: 86_400_000 } as const;
+
+/**
+ * Trust period flags shared by `pair`, `join`-less issuing and `trust`:
+ * --forever | [--once] [--for <30m|8h|7d>]. Nothing given → `fallback`
+ * (8 hours for pairing); `null` fallback means "a flag is required".
+ */
+function parseGrant(ctx: LanCliContext, fallback: PeerGrant | null): PeerGrant {
+  const L = lanMessages(ctx.lang);
+  const forever = ctx.flags.has("forever");
+  const once = ctx.flags.has("once");
+  const forValue = flagString(ctx, "for");
+  if (forever && (once || forValue !== undefined)) ctx.fail(L.grantConflict);
+  if (forever) return { ttl_ms: null, uses: null };
+  let ttl: number | null = null;
+  if (forValue !== undefined) {
+    const match = DURATION_RE.exec(forValue);
+    const ms = match === null ? 0 : Number(match[1]) * DURATION_UNIT_MS[match[2] as keyof typeof DURATION_UNIT_MS];
+    if (ms < 60_000 || ms > 366 * 86_400_000) ctx.fail(L.badDuration(forValue));
+    ttl = ms;
+  }
+  if (!once && ttl === null) {
+    if (fallback === null) ctx.fail(L.trustUsage);
+    return fallback;
+  }
+  return { ttl_ms: ttl ?? DEFAULT_PEER_GRANT.ttl_ms, uses: once ? 1 : null };
+}
+
+/** "valid for 8h (until 10-07 18:30), 1 message" / "permanent". */
+function describeTerms(lang: Lang, terms: PeerTerms, now = Date.now()): string {
+  const L = lanMessages(lang);
+  const parts: string[] = [];
+  if (terms.expires_at !== undefined) {
+    const at = new Date(terms.expires_at);
+    const left = Math.max(0, at.getTime() - now);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const stamp = `${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`;
+    const span = left >= 86_400_000 ? `${Math.round(left / 86_400_000)}d`
+      : left >= 3_600_000 ? `${Math.round(left / 3_600_000)}h`
+      : `${Math.max(1, Math.round(left / 60_000))}m`;
+    parts.push(L.termsUntil(span, stamp));
+  }
+  if (terms.uses_left !== undefined) parts.push(L.termsUses(terms.uses_left));
+  return parts.length === 0 ? L.termsForever : parts.join(L.termsJoin);
+}
+
+function describeGrant(lang: Lang, grant: PeerGrant): string {
+  return describeTerms(lang, grantTerms(grant));
 }
 
 function describeClientError(ctx: LanCliContext, peer: string, error: unknown): string {
@@ -190,14 +252,14 @@ function lanStatus(ctx: LanCliContext): void {
   const L = lanMessages(ctx.lang);
   const state = liveDaemonState();
   const id = identity(ctx);
-  const peers = guarded(ctx, () => listPeers());
+  const peers = guarded(ctx, () => activePeers());
   const offers = openPairOffers();
   if (ctx.flags.has("json")) {
     console.log(JSON.stringify({
       running: state !== null,
       daemon: state,
       fingerprint: id.fingerprint,
-      peers: peers.map((p) => ({ label: p.label, name: p.name, fingerprint: p.fingerprint, addrs: p.addrs, last_seen: p.last_seen ?? null })),
+      peers: peers.map((p) => ({ label: p.label, name: p.name, fingerprint: p.fingerprint, addrs: p.addrs, last_seen: p.last_seen ?? null, expires_at: p.expires_at ?? null, uses_left: p.uses_left ?? null })),
       open_pairing_codes: offers.length,
     }, null, 2));
     return;
@@ -214,18 +276,31 @@ function lanStatus(ctx: LanCliContext): void {
 
 function lanPeers(ctx: LanCliContext): void {
   const L = lanMessages(ctx.lang);
+  const gone = guarded(ctx, () => pruneExpiredPeers());
   const peers = guarded(ctx, () => listPeers());
   if (ctx.flags.has("json")) {
     console.log(JSON.stringify(peers.map(({ key: _key, ...rest }) => rest), null, 2));
     return;
   }
+  if (gone.length > 0) console.log(L.peersPruned(gone.map((p) => p.label).join(", ")));
   if (peers.length === 0) {
     console.log(L.peersNone);
     return;
   }
   for (const p of peers) {
-    console.log(L.peerLine(p.label, p.name, shortFingerprint(p.fingerprint), p.addrs[0] ?? "?", p.last_seen ?? "?"));
+    console.log(L.peerLine(p.label, p.name, shortFingerprint(p.fingerprint), p.addrs[0] ?? "?", p.last_seen ?? "?", describeTerms(ctx.lang, p)));
   }
+}
+
+/** `ocs lan trust <peer> --once|--for <d>|--forever`: change how long *this* machine trusts it. */
+function lanTrust(ctx: LanCliContext, query: string): void {
+  const L = lanMessages(ctx.lang);
+  const peer = requirePeer(ctx, query, { allowExpired: true });
+  const grant = parseGrant(ctx, null);
+  const updated = guarded(ctx, () => setPeerTerms(peer.fingerprint, grantTerms(grant)));
+  if (updated === null) ctx.fail(L.peerNotFound(query));
+  console.log(L.trustUpdated(updated.label, describeTerms(ctx.lang, updated)));
+  console.log(L.trustLocalOnly);
 }
 
 // ───────────────────────── 配对 ─────────────────────────
@@ -236,22 +311,54 @@ async function lanPairIssue(ctx: LanCliContext): Promise<void> {
   if (state === null) ctx.fail(L.pairNeedsDaemon);
   const label = flagString(ctx, "label");
   if (label !== undefined && !PEER_LABEL_RE.test(label)) ctx.fail(L.badLabel(label));
+  const grant = parseGrant(ctx, DEFAULT_PEER_GRANT);
+  const mode = ctx.flags.has("code") ? "code" : "approve";
   const id = identity(ctx);
-  const { offer, token } = createPairOffer(label === undefined ? {} : { label });
-  const code = encodePairingCode(fingerprintDigest(id.publicKey), token);
-  console.log(L.pairIssued(code, Math.round(PAIR_OFFER_TTL_MS / 60000)));
-  const addrs = localIpv4Addresses().map((ip) => `${ip}:${state.port}`);
-  if (addrs.length > 0) console.log(L.pairAddrHint(addrs.join(", ")));
-  console.log(L.pairWaiting);
+  const { offer, token } = createPairOffer({ ...(label === undefined ? {} : { label }), mode, grant });
+  const minutes = Math.round(PAIR_OFFER_TTL_MS / 60000);
+  // Link-local (169.254/16) addresses are self-assigned on idle NICs and only add noise
+  // to the copied text; discovery still finds the machine if none of the rest work.
+  const addrs = localIpv4Addresses().filter((ip) => !ip.startsWith("169.254.")).map((ip) => `${ip}:${state.port}`);
+  if (mode === "code") {
+    const code = encodePairingCode(fingerprintDigest(id.publicKey), token);
+    console.log(L.pairIssued(code, minutes));
+    if (addrs.length > 0) console.log(L.pairAddrHint(addrs.join(", ")));
+    console.log(L.pairTermsLine(describeGrant(ctx.lang, grant)));
+  } else {
+    // The copyable text pins this machine's key (100-bit fingerprint prefix), so
+    // whoever runs it cannot be steered to an impostor; this side then checks the
+    // requester through the 6-digit code before trusting it.
+    console.log(L.pairInvite({
+      name: state.name,
+      target: id.fingerprint.slice(0, 20),
+      addrs,
+      terms: describeGrant(ctx.lang, grant),
+      minutes,
+    }));
+  }
+  console.log(mode === "code" ? L.pairWaiting : L.pairWaitingRequest);
+  await waitForOffer(ctx, offer);
+}
+
+/**
+ * Block until the offer is redeemed, expires, is burned or cancelled. In approve
+ * mode, every incoming request is shown with its 6-digit code; on a TTY we ask
+ * y/N inline, otherwise the user (or an agent) answers with `ocs lan approve <code>`.
+ */
+async function waitForOffer(ctx: LanCliContext, offer: PairOffer): Promise<void> {
+  const L = lanMessages(ctx.lang);
+  const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true;
   let cancelled = false;
   const cancel: NodeJS.SignalsListener = () => {
     cancelled = true;
   };
-  // 关终端（SIGHUP）也得作废邀请，不然码一直有效到过期。
+  // Closing the terminal (SIGHUP) must void the offer too, or it stays live until expiry.
   const signals: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP"];
   for (const signal of signals) process.once(signal, cancel);
   let final: ReturnType<typeof closePairOffer> = null;
   let stop: "cancelled" | "expired" | "burned" | "paired" = "expired";
+  let shown: string | null = null;
+  let prompt: { requestId: string; abort: () => void } | null = null;
   try {
     for (;;) {
       const current = loadPairOffer(offer.id);
@@ -268,15 +375,43 @@ async function lanPairIssue(ctx: LanCliContext): Promise<void> {
         break;
       }
       if (current === null || Date.parse(current.expires_at) <= Date.now()) break;
+      const request = current.request;
+      if (prompt !== null && request?.id !== prompt.requestId) {
+        prompt.abort();
+        prompt = null;
+        console.log(L.pairRequestWithdrawn);
+      }
+      if (request !== undefined && current.decision === undefined && request.id !== shown) {
+        shown = request.id;
+        console.log(L.pairRequestShown(request.name, request.addr ?? "?", formatSas(request.sas), shortFingerprint(request.fingerprint)));
+        if (interactive) {
+          const requestId: string = request.id;
+          const asked = askYesNo(L.pairAskConfirm);
+          prompt = { requestId, abort: asked.abort };
+          void asked.answer.then((yes) => {
+            if (prompt?.requestId !== requestId) return;
+            prompt = null;
+            if (yes === null) return;
+            if (!decidePairRequest(offer.id, requestId, yes)) console.log(L.pairRequestWithdrawn);
+            else if (!yes) console.log(L.pairRequestRejected);
+          });
+        } else {
+          console.log(L.pairApproveHint(request.sas));
+        }
+      }
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
   } finally {
+    prompt?.abort();
     for (const signal of signals) (process as NodeJS.EventEmitter).removeListener(signal, cancel);
-    // 锁内关闭并拿最终状态：兑码与关闭互斥，最后一刻兑现成功的也如实报成功。
+    // Close under the lock and read the final state: redeem/settle and close are
+    // mutually exclusive, so a pairing that lands at the last moment is reported as such.
     final = closePairOffer(offer.id);
   }
   if (final?.status === "paired" && final.peer !== undefined) {
     console.log(L.pairIssuerDone(final.peer.label, final.peer.name, shortFingerprint(final.peer.fingerprint)));
+    const peer = findPeer(final.peer.label);
+    if (peer !== null) console.log(L.pairTermsLine(describeTerms(ctx.lang, peer)));
     return;
   }
   if (stop === "cancelled") {
@@ -285,6 +420,50 @@ async function lanPairIssue(ctx: LanCliContext): Promise<void> {
     return;
   }
   ctx.fail(stop === "burned" ? L.pairBurned : L.pairExpired);
+}
+
+/**
+ * One-line y/N question that can be withdrawn (the request timed out on the daemon side).
+ * Reads stdin in the terminal's cooked mode instead of using node:readline: under Bun,
+ * closing a readline interface on a TTY blocks the event loop, which froze the approval.
+ * In cooked mode Ctrl+C still raises SIGINT, so the offer's own signal handler cancels it.
+ */
+function askYesNo(question: string): { answer: Promise<boolean | null>; abort: () => void } {
+  let settle: (value: boolean | null) => void = () => {};
+  const answer = new Promise<boolean | null>((resolve) => {
+    settle = resolve;
+  });
+  let buffer = "";
+  let done = false;
+  const finish = (value: boolean | null) => {
+    if (done) return;
+    done = true;
+    process.stdin.off("data", onData);
+    process.stdin.pause();
+    settle(value);
+  };
+  const onData = (chunk: string | Buffer) => {
+    buffer += chunk.toString();
+    const nl = buffer.indexOf("\n");
+    if (nl >= 0) finish(/^\s*y(es)?\s*$/i.test(buffer.slice(0, nl)));
+  };
+  process.stdout.write(question);
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", onData);
+  process.stdin.resume();
+  return { answer, abort: () => finish(null) };
+}
+
+/** `ocs lan approve <code>` / `ocs lan reject`: answer a pending request without a TTY. */
+function lanDecide(ctx: LanCliContext, approve: boolean, given: string): void {
+  const L = lanMessages(ctx.lang);
+  const pending = openPairOffers().filter((o) => o.mode === "approve" && o.request !== undefined && o.decision === undefined);
+  if (pending.length === 0) ctx.fail(L.decideNone);
+  const digits = given.replace(/\s+/g, "");
+  const offer = approve ? pending.find((o) => o.request!.sas === digits) : pending[0]!;
+  if (offer === undefined) ctx.fail(L.approveMismatch(given));
+  if (!decidePairRequest(offer.id, offer.request!.id, approve)) ctx.fail(L.pairRequestWithdrawn);
+  console.log(approve ? L.approveDone(offer.request!.name) : L.pairRequestRejected);
 }
 
 async function lanPairJoin(ctx: LanCliContext, code: string): Promise<void> {
@@ -298,12 +477,39 @@ async function lanPairJoin(ctx: LanCliContext, code: string): Promise<void> {
       ...(label === undefined ? {} : { label }),
     });
     console.log(L.pairJoined(peer.label, peer.name, shortFingerprint(peer.fingerprint), used));
+    console.log(L.pairTermsLine(describeTerms(ctx.lang, peer)));
     console.log(L.pairCheckFingerprint);
   } catch (error) {
     if (error instanceof LanClientError) {
       ctx.fail(error.mismatches.length > 0
         ? L.pairFailed(error.code, L.keyMismatch("the code's issuer", error.mismatches.join(", ")))
         : L.pairFailed(error.code, error.message));
+    }
+    ctx.fail(L.pairFailed("error", error instanceof Error ? error.message : String(error)));
+  }
+}
+
+/** `ocs lan join <key-prefix> [--addr a,b]`: the command inside the copied pairing text. */
+async function lanJoin(ctx: LanCliContext, target: string): Promise<void> {
+  const L = lanMessages(ctx.lang);
+  if (!PAIR_TARGET_RE.test(target.toLowerCase())) ctx.fail(L.joinBadTarget(target));
+  const label = flagString(ctx, "label");
+  if (label !== undefined && !PEER_LABEL_RE.test(label)) ctx.fail(L.badLabel(label));
+  const addrs = (flagString(ctx, "addr") ?? "").split(",").map((a) => a.trim()).filter((a) => a !== "");
+  if (liveDaemonState() === null) console.log(L.joinDaemonHint);
+  try {
+    const { peer, addr: used } = await pairByRequest(target, identity(ctx), {
+      addrs,
+      ...(label === undefined ? {} : { label }),
+      onSas: (sas, serverName) => console.log(L.joinShowSas(serverName, formatSas(sas))),
+    });
+    console.log(L.pairJoined(peer.label, peer.name, shortFingerprint(peer.fingerprint), used));
+    console.log(L.pairTermsLine(describeTerms(ctx.lang, peer)));
+  } catch (error) {
+    if (error instanceof LanClientError) {
+      ctx.fail(error.mismatches.length > 0
+        ? L.pairFailed(error.code, L.keyMismatch(target, error.mismatches.join(", ")))
+        : L.pairFailed(error.code, L.joinErrorHint(error.code) ?? error.message));
     }
     ctx.fail(L.pairFailed("error", error instanceof Error ? error.message : String(error)));
   }
@@ -334,7 +540,7 @@ async function lanScan(ctx: LanCliContext): Promise<void> {
 }
 
 function lanUnpair(ctx: LanCliContext, query: string): void {
-  const peer = requirePeer(ctx, query);
+  const peer = requirePeer(ctx, query, { allowExpired: true });
   removePeer(peer.fingerprint);
   console.log(lanMessages(ctx.lang).unpaired(peer.label));
 }
@@ -344,7 +550,7 @@ export async function printLanWho(ctx: Pick<LanCliContext, "lang" | "fail">, onl
   const L = lanMessages(ctx.lang);
   let peers: LanPeer[];
   try {
-    peers = only === undefined ? listPeers() : [only];
+    peers = only === undefined ? activePeers() : [only];
   } catch (error) {
     ctx.fail(L.stateError(error instanceof Error ? error.message : String(error)));
   }
@@ -386,7 +592,7 @@ export function doctorLanSection(
   console.log(L.doctorHeader);
   let peers: number;
   try {
-    peers = listPeers().length;
+    peers = activePeers().length;
   } catch (error) {
     report.bad(L.stateError(error instanceof Error ? error.message : String(error)));
     return;
@@ -404,7 +610,7 @@ export function doctorLanSection(
 
 export function lanPeerCount(): number {
   try {
-    return listPeers().length;
+    return activePeers().length;
   } catch {
     return 0;
   }
@@ -484,8 +690,21 @@ export async function lanDm(ctx: LanCliContext, target: string, body: string, se
 export async function cmdLan(ctx: LanCliContext): Promise<void> {
   const L = lanMessages(ctx.lang);
   const [sub, arg, ...extra] = ctx.positional;
+  // `ocs lan approve 482 913` — the code may be typed with its space.
+  if (sub === "approve") {
+    if (arg === undefined) ctx.fail(L.usage);
+    return lanDecide(ctx, true, [arg, ...extra].join(""));
+  }
   if (extra.length > 0) ctx.fail(L.usage);
   switch (sub) {
+    case "reject":
+      return lanDecide(ctx, false, "");
+    case "join":
+      if (arg === undefined) ctx.fail(L.usage);
+      return lanJoin(ctx, arg);
+    case "trust":
+      if (arg === undefined) ctx.fail(L.usage);
+      return lanTrust(ctx, arg);
     case "up":
       return lanUp(ctx);
     case "down":
