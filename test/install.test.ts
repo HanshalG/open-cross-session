@@ -40,6 +40,8 @@ out=""
 while [ "$#" -gt 0 ]; do
   if [ "$1" = "-o" ]; then out="$2"; shift 2; else shift; fi
 done
+case "$out" in *.sha256) kind=checksum ;; *) kind=archive ;; esac
+if [ "\${INSTALL_TEST_DOWNLOAD_FAIL:-}" = "$kind" ]; then exit 22; fi
 case "$out" in
   *.sha256) printf '%s\\n' 'deadbeef  archive' > "$out" ;;
   *) printf '%s\\n' 'archive' > "$out" ;;
@@ -57,13 +59,14 @@ exit "\${INSTALL_TEST_HASH_EXIT:-0}"
     }
   }
   executable(join(bin, "tar"), `#!/bin/sh
+if [ "\${INSTALL_TEST_EXTRACT_EXIT:-0}" != 0 ]; then exit "$INSTALL_TEST_EXTRACT_EXIT"; fi
 dest=""
 while [ "$#" -gt 0 ]; do
   if [ "$1" = "-C" ]; then dest="$2"; shift 2; else shift; fi
 done
 printf '%s\\n' '#!/bin/sh' \\
   'case "$1" in' \\
-  '  help) exit 0 ;;' \\
+  '  help) exit "\${INSTALL_TEST_SMOKE_EXIT:-0}" ;;' \\
   '  version) echo "ocs 0.4.2" ;;' \\
   '  skill) echo "$*" >> "$INSTALL_TEST_BINARY_LOG" ;;' \\
   'esac' > "$dest/ocs"
@@ -101,6 +104,23 @@ async function run(env: Record<string, string>): Promise<{ code: number; stdout:
 }
 
 describe("curl installer skill setup", () => {
+  test.each([
+    ["archive download", { INSTALL_TEST_DOWNLOAD_FAIL: "archive" }],
+    ["checksum download", { INSTALL_TEST_DOWNLOAD_FAIL: "checksum" }],
+    ["archive extraction", { INSTALL_TEST_EXTRACT_EXIT: "1" }],
+    ["binary smoke test", { INSTALL_TEST_SMOKE_EXIT: "1" }],
+  ] as const)("failure during %s preserves the existing installation", async (_step, failureEnv) => {
+    const f = fixture();
+    mkdirSync(f.installDir, { recursive: true });
+    const previous = "#!/bin/sh\necho old-binary-invoked >> \"$INSTALL_TEST_BINARY_LOG\"\nexit 0\n";
+    executable(join(f.installDir, "ocs"), previous);
+    Object.assign(f.env, failureEnv);
+    const result = await run(f.env);
+    expect(result.code).not.toBe(0);
+    expect(readFileSync(join(f.installDir, "ocs"), "utf8")).toBe(previous);
+    expect(existsSync(f.npxLog)).toBe(false);
+    expect(existsSync(f.binaryLog)).toBe(false);
+  });
   test.each(["shasum", "sha256sum"] as const)("a failed %s preserves the existing install even if it prints a matching digest", async (tool) => {
     const f = fixture(0, tool);
     mkdirSync(f.installDir, { recursive: true });
