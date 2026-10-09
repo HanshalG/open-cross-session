@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.7
+
+LAN startup recovers from stale daemon state after a crash or reboot.
+
+- A saved PID must belong to an OCS daemon before it counts as running. Unrelated live processes no longer block startup or appear as a running daemon in status output.
+- Daemon process checks require the exact `_lan-daemon` argument. Windows also verifies the executable path rather than relying on its image name alone.
+- Nonpositive PIDs are rejected when reading daemon state.
+
 ## 0.8.6
 
 LAN discovery preserves valid agents when a peer sends malformed roster entries.

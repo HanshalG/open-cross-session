@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { join } from "node:path";
 import { generateIdentity } from "../src/lan-crypto.ts";
-import { removePeer, trustPeer } from "../src/lan-store.ts";
+import { loadOrCreateIdentity, removePeer, trustPeer, writeDaemonState } from "../src/lan-store.ts";
 import { CLAUDE_NATIVE_SESSIONS_DIR_ENV } from "../src/claude-inject.ts";
 import { OCS_HOME_ENV, readReceipts, readRoutedMessages } from "../src/store.ts";
 import { fakeClaudeInbox, type FakeInbox } from "./fake-claude";
@@ -91,6 +91,32 @@ const note = (frame: string) =>
   (JSON.parse(frame.trim().split("\n").at(-1)!) as { message: { content: string } }).message.content;
 
 describe("ocs lan 端到端（两台机器）", () => {
+  test("stale daemon state pointing to another live process does not prevent startup", async () => {
+    const b = box("stale", "stale-session", "aaaaaaaa-1111-2222-3333-444444444444", await freePort());
+    const unrelated = Bun.spawn(["sleep", "60"], { stdio: ["ignore", "ignore", "ignore"] });
+    const identity = loadOrCreateIdentity(b.env);
+    writeDaemonState({ pid: unrelated.pid, port: await freePort(), bind: "127.0.0.1", name: "stale",
+      fingerprint: identity.fingerprint, discover: false, version: "0.8.0", started_at: new Date().toISOString() }, b.env);
+    try {
+      const before = await run(b, ["lan", "status", "--json"]);
+      expect(before.code).toBe(0);
+      expect(JSON.parse(before.stdout).running).toBe(false);
+      const up = await run(b, ["lan", "up", "--bind", "127.0.0.1", "--port", String(await freePort()), "--no-discover"]);
+      expect(up.code).toBe(0);
+      const after = JSON.parse((await run(b, ["lan", "status", "--json"])).stdout);
+      expect(after.running).toBe(true);
+      expect(after.daemon.pid).not.toBe(unrelated.pid);
+      expect(unrelated.exitCode).toBeNull();
+      const down = await run(b, ["lan", "down"]);
+      expect(down.code).toBe(0);
+      expect(unrelated.exitCode).toBeNull();
+    } finally {
+      await run(b, ["lan", "down"]);
+      unrelated.kill();
+      b.inbox.close();
+    }
+  }, T);
+
   test("up → 发现配对 → dm 唤醒 → 复制 Reply 行回信 → 两边落同一 lan 频道 → down", async () => {
     const discovery = await freePort();
     const a = box("a", "worker-a", "aaaaaaaa-1111-2222-3333-444455556666", discovery);

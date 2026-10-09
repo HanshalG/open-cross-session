@@ -5,6 +5,7 @@
 // 信任库被别人改一行就等于给陌生机器发了通行证，这里不许静默容忍。
 
 import { randomBytes, randomUUID } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import {
   chmodSync,
   closeSync,
@@ -661,19 +662,40 @@ export function clearDaemonState(pid: number, env: NodeJS.ProcessEnv = process.e
 export function readDaemonState(env: NodeJS.ProcessEnv = process.env): LanDaemonState | null {
   try {
     const raw = readPrivateJson(daemonStatePath(env)) as LanDaemonState | null;
-    return raw !== null && Number.isInteger(raw.pid) ? raw : null;
+    return raw !== null && Number.isInteger(raw.pid) && raw.pid > 0 ? raw : null;
   } catch {
     return null;
   }
 }
 
-/** 运行态文件里的 pid 还活着吗（ESRCH 以外的错误——如 EPERM——当活着处理）。 */
+/** Require the daemon command argument so a reused PID cannot block startup. */
+export function isLanDaemonPid(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  if (process.platform === "win32") {
+    const out = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
+      `Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}' | Select-Object ExecutablePath,CommandLine | ConvertTo-Json -Compress`],
+      { encoding: "utf8", windowsHide: true, timeout: 3000 });
+    if (out.status !== 0 || typeof out.stdout !== "string") return false;
+    try {
+      const info = JSON.parse(out.stdout) as { ExecutablePath?: unknown; CommandLine?: unknown } | null;
+      return typeof info?.ExecutablePath === "string" && info.ExecutablePath.toLowerCase() === process.execPath.toLowerCase() &&
+        typeof info.CommandLine === "string" && /(?:^|[\s"'])_lan-daemon(?:[\s"']|$)/.test(info.CommandLine);
+    } catch {
+      return false;
+    }
+  }
+  const out = spawnSync("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8", timeout: 3000 });
+  return out.status === 0 && typeof out.stdout === "string" &&
+    /(?:^|[\s"'])_lan-daemon(?:[\s"']|$)/.test(out.stdout);
+}
+
+/** A saved daemon is live only while its PID belongs to a daemon process. */
 export function liveDaemonState(env: NodeJS.ProcessEnv = process.env): LanDaemonState | null {
   const state = readDaemonState(env);
   if (state === null) return null;
   try {
     process.kill(state.pid, 0);
-    return state;
+    return isLanDaemonPid(state.pid) ? state : null;
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === "ESRCH" ? null : state;
   }

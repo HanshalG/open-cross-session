@@ -31,6 +31,7 @@ import {
   listPeers,
   loadLanConfig,
   loadOrCreateIdentity,
+  isLanDaemonPid,
   loadPairOffer,
   openPairOffers,
   PAIR_OFFER_TTL_MS,
@@ -214,18 +215,6 @@ function allowThroughMacFirewall(selfCommand: readonly string[]): "allowed" | "o
   const text = typeof apps.stdout === "string" ? apps.stdout : "";
   const at = text.indexOf(`${exe} `) >= 0 ? text.indexOf(`${exe} `) : text.indexOf(`${exe}\n`);
   return at >= 0 && /Allow incoming connections/.test(text.slice(at, at + exe.length + 80)) ? "allowed" : "failed";
-}
-
-/** 目标 pid 的命令行里要有 `_lan-daemon`：pid 复用时绝不能把别的进程杀掉。 */
-function isLanDaemonPid(pid: number): boolean {
-  if (process.platform === "win32") {
-    // tasklist 只给映像名：要求它就是当前这个 ocs 可执行文件（守护进程由它自己拉起）。
-    const out = spawnSync("tasklist", ["/FI", `PID eq ${pid}`, "/NH", "/FO", "CSV"], { encoding: "utf8", windowsHide: true });
-    const image = process.execPath.split(/[\\/]/).pop()!.toLowerCase();
-    return typeof out.stdout === "string" && out.stdout.toLowerCase().includes(`"${image}"`);
-  }
-  const out = spawnSync("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8" });
-  return typeof out.stdout === "string" && out.stdout.includes(LAN_DAEMON_COMMAND);
 }
 
 async function lanDown(ctx: LanCliContext): Promise<void> {
