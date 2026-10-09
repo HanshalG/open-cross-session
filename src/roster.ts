@@ -641,7 +641,8 @@ export function canonicalWakeAddress(address: string, env: NodeJS.ProcessEnv = p
     // Preserve the unique address when the native name would broadcast to several sessions.
     const name = resolved.claude.name;
     const matches = listNativeSessions(env).filter((session) => session.name === name);
-    return matches.length === 1 ? name : address;
+    const named = readOcsName(name, env);
+    return matches.length === 1 && (named === null || claudeEntryMatches(named, resolved.claude)) ? name : address;
   }
   return address;
 }

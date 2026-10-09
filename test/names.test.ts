@@ -170,12 +170,14 @@ describe("按名字 / 短 id 寻址", () => {
   });
 
   test("ocs 名字与另一个活会话精确名撞车时拒绝任选", () => {
-    const { env, self } = world();
+    const { env, self, other } = world();
     // 绕过 CLI 的撞车检查，模拟「先起名、后来别的会话 /rename 成同名」。
     setOcsName("beta-2", { kind: "claude", session: self }, { env });
     const resolved = resolveDmTarget("beta-2", env);
     expect(resolved?.ambiguousNameTargets?.length).toBe(2);
     expect(resolved?.claude).toBeUndefined();
+    expect(selectWakeTargets([canonicalWakeAddress("beta-2", env)], { env }).targets).toEqual([]);
+    expect(selectWakeTargets([canonicalWakeAddress("claude-9f00aa11", env)], { env }).targets.map((target) => target.pid)).toEqual([other.pid]);
   });
 
   test("名字可以指向 Codex / Pi；@提及归一成分流认得的地址", () => {

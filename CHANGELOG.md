@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.9
+
+Channel mentions respect conflicts between OCS aliases and Claude native names.
+
+- A name shared by an OCS alias and a different live Claude session wakes nobody instead of selecting the native-name match.
+- A unique Claude short ID remains usable when its session's native name conflicts with another session's OCS alias.
+
 ## 0.8.8
 
 The OCS skill defaults to native desktop chats, and Claude addressing keeps a unique alias or ID attached to its intended session.

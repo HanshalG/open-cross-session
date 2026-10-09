@@ -313,12 +313,13 @@ export function selectWakeTargets(
   const matchedNames = new Set<string>();
   for (const mention of wanted) {
     const exact = sessions.filter((session) => session.name === mention);
+    const named = readOcsName(mention, options.env);
     if (exact.length > 0) {
+      if (named !== null && exact.some((session) => !claudeEntryMatches(named, session))) continue;
       matchedNames.add(mention);
       for (const session of exact) selectedPids.add(session.pid);
       continue;
     }
-    const named = readOcsName(mention, options.env);
     if (named !== null) {
       const owners = sessions.filter((session) => claudeEntryMatches(named, session));
       if (owners.length === 1) {
