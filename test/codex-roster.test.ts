@@ -79,19 +79,21 @@ describe("desktop roster titles", () => {
     }
   });
 
-  test("same short id and same title produce distinct routable names", () => {
+  test("same short id and normalized title produce distinct stable routable names", () => {
     const f = fixture();
     add(f, A, "Audit pilot prompts");
-    add(f, B, "Audit pilot prompts");
+    add(f, B, "AUDIT—pilot prompts");
     f.db.close();
     const rows = listCodexRosterSessions(f.root);
-    const names = rows.map((r) => codexRosterName(r, listOcsNames(f.env), f.env)!);
-    expect(names[0]).toBe("audit-pilot-prompts");
-    expect(names[1]).not.toBe(names[0]);
+    const rosterNames = listOcsNames(f.env);
+    const aliases = rows.map((r) => codexRosterName(r, rosterNames, f.env)!);
+    expect(aliases[0]).toBe("audit-pilot-prompts");
+    expect(aliases[1]).not.toBe(aliases[0]);
     for (let i = 0; i < rows.length; i++) {
-      expect(resolveDmTarget(names[i]!, f.env)?.threadId).toBe(rows[i]!.threadId);
-      expect(codexRosterName(rows[i]!, listOcsNames(f.env), f.env)).toBe(names[i]);
+      expect(resolveDmTarget(aliases[i]!, f.env)?.threadId).toBe(rows[i]!.threadId);
     }
+    const rebuiltNames = listOcsNames(f.env);
+    expect(rows.map((r) => codexRosterName(r, rebuiltNames, f.env))).toEqual(aliases);
   });
 
   test("does not expose generated setup instructions as a chat title", () => {

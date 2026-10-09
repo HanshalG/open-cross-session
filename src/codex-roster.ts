@@ -52,7 +52,7 @@ function rosterTitle(row: IndexedThread): string {
 
 export function codexRosterName(
   session: CodexSessionSummary,
-  names: readonly OcsNameEntry[],
+  names: OcsNameEntry[],
   env: NodeJS.ProcessEnv,
 ): string | undefined {
   const owner = { kind: "codex" as const, id: session.threadId };
@@ -63,8 +63,14 @@ export function codexRosterName(
     .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 54).replace(/-+$/g, "") || "chat";
   const suffix = createHash("sha256").update(session.threadId).digest("hex").slice(0, 8);
   for (const name of [base, `${base}-${suffix}`]) {
+    // Earlier sessions in this roster build may already have claimed the base.
+    // Skip the known collision; setOcsName still arbitrates concurrent writers.
+    if (names.some((entry) => entry.name.toLowerCase() === name.toLowerCase())) continue;
     const result = setOcsName(name, owner, { env });
-    if (result.ok) return result.entry.name;
+    if (result.ok) {
+      names.push(result.entry);
+      return result.entry.name;
+    }
   }
   return undefined;
 }

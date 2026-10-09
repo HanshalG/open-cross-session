@@ -338,6 +338,7 @@ export function buildRoster(env: NodeJS.ProcessEnv = process.env, hermes: readon
   const entries: RosterEntry[] = [];
   const selfPid = findSelfClaudePid(env);
   const nativeSessions = listNativeSessions(env).filter((session) => session.name !== null);
+  // Reused by Codex alias allocation and extended after each successful claim.
   const names = listOcsNames(env);
   for (const s of nativeSessions) {
     if (s.name === null) continue;
