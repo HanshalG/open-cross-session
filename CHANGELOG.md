@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.14
+
+LAN discovery distinguishes missing trust from a network outage, and Windows installation handles an absent user-level PATH.
+
+- An authenticated peer that no longer grants trust reports `unpaired` with empty discovery entries. Text discovery and DM errors explain that the peer is reachable but does not currently trust this machine. No requests are retried or trust granted automatically.
+- English and Chinese diagnostics, structured discovery documentation and the bundled skill describe the trust state consistently. A two-daemon regression covers asymmetric trust in JSON, text and DM errors.
+- Windows installation normalizes a missing user-level PATH before appending the install directory, preventing a null-method failure that skipped skill setup and daemon restart. Native PowerShell expression and parser checks passed; full Windows installer execution remains unverified.
+
 ## 0.8.13
 
 Codex roster discovery avoids redundant ownership probes and repeated alias claims.
