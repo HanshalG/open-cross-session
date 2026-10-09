@@ -223,9 +223,11 @@ ocs dm <address>@<peer> "<text>" # message + wake an agent on a paired machine
   dm-* channel that exits 2 too. A DM does not auto-wake the peer on plain send.
 - Codex delivery ladder depends on the host: a Desktop-hosted task goes through
   Desktop IPC first (it keeps the native cross-task provenance envelope; a queued
-  message is recorded as a plain user message instead), while a terminal TUI goes
-  through `codex queue --thread` — the only route that reaches it, needing neither
-  cmux nor Desktop. Then a cmux surface, then queue as the last resort. ocs only queues to a thread whose rollout has a live
+  message is recorded as a plain user message instead). A live terminal TUI
+  tries `codex queue --thread` first, requiring neither cmux nor Desktop. If that
+  route is unavailable, a uniquely matched idle cmux surface can provide a
+  fallback. Desktop tasks try a cmux fallback after IPC, then queue as a last
+  resort when a live rollout holder exists. ocs only queues to a thread whose rollout has a live
   process holder, because `codex queue` writes to the thread store and reports
   success even when nobody is running — queued is not read.
   If no rung delivers, the message remains stored and appears in that task's
