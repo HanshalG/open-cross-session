@@ -131,7 +131,7 @@ describe("ocs lan 端到端（两台机器）", () => {
       };
       const joinLine = (await readUntil(/ocs lan join ([a-z2-7]{20})( --addr \S+)?/))[1]!;
       expect(issued).toContain("copy from here");
-      expect(issued).toContain("Trust: 8h left");
+      expect(issued).toContain("Trust: permanent");
       const joiner = Bun.spawn([process.execPath, CLI, "lan", "join", joinLine], { env: b.env, stdout: "pipe", stderr: "pipe" });
       const sas = (await readUntil(/check code: (\d{3}) (\d{3})/)).slice(1, 3).join("");
       expect(issued).toContain(`ocs lan approve ${sas}`);
@@ -144,7 +144,7 @@ describe("ocs lan 端到端（两台机器）", () => {
       expect(joiner.exitCode).toBe(0);
       expect(joinOut).toContain(`${sas.slice(0, 3)} ${sas.slice(3)}`); // B showed the same code
       expect(joinOut).toContain("paired with alpha");
-      expect(joinOut).toMatch(/trust: 8h left/);
+      expect(joinOut).toContain("trust: permanent");
       for (;;) {
         const { value, done } = await reader.read();
         if (done) break;
@@ -154,8 +154,9 @@ describe("ocs lan 端到端（两台机器）", () => {
       expect(issuer.exitCode).toBe(0);
       expect(issued).toContain("paired with bee (bravo)");
       const peersA = JSON.parse((await run(a, ["lan", "peers", "--json"])).stdout) as Array<{ label: string; expires_at?: string }>;
-      const expiresA = Date.parse(peersA.find((p) => p.label === "bee")!.expires_at!);
-      expect(Math.abs(expiresA - (Date.now() + 8 * 3600_000))).toBeLessThan(60_000);
+      expect(peersA.find((p) => p.label === "bee")!.expires_at).toBeUndefined();
+      const peersB = JSON.parse((await run(b, ["lan", "peers", "--json"])).stdout) as Array<{ label: string; expires_at?: string }>;
+      expect(peersB.find((p) => p.label === "alpha")!.expires_at).toBeUndefined();
 
       // B（tester 会话）→ A 的 worker-a
       const dm = await run(b, ["dm", "worker-a@alpha", "ping over the lan"]);

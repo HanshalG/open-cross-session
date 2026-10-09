@@ -28,7 +28,7 @@ The session on A wakes with the message and a `Reply:` line that routes straight
 
 - **Finds each other** on the LAN (multicast + subnet broadcast); `--addr` when the network blocks both.
 - **Pairing by copy-paste, no trust-on-first-use:** `ocs lan pair` prints a ready-to-send text carrying its key fingerprint; you approve the other side after both screens show the same 6-digit code.
-- **Trust that runs out:** 8 hours by default, `--once` for a single message, `--forever` for your own devices.
+- **Persistent pairing:** stays connected until you unpair; `--for` sets an expiry and `--once` allows a single message.
 - **Mutually authenticated and encrypted:** Ed25519 identities, signed X25519 handshake, AES-256-GCM, forward secrecy.
   Unpaired machines can only redeem a live code â€” nothing else.
 - **Off by default.** `ocs lan up` starts it; `ocs lan autostart on` keeps it across logins.
@@ -316,10 +316,12 @@ ocs who --lan               # agents on A: claude-1a2b3c4d@mini  claude  idle  â
 ocs dm claude-1a2b3c4d@mini "can you look at the CI failure?"
 ```
 
-Trust is temporary unless you say otherwise: `ocs lan pair` grants 8 hours, `--for 30m|2h|7d`
-picks another period, `--once` allows a single message, and `--forever` is meant for your own
-devices. Both sides get the same period; expired peers are refused and dropped.
-`ocs lan trust <peer> --for 8h | --forever` changes it later on this side.
+Pairing stays trusted until you run `ocs lan unpair <peer>`. Use `--for 30m|2h|7d`
+for a timed pairing or `--once` for a single message. Both sides get the same terms;
+explicitly timed or single-use peers are refused when their limits are reached.
+`ocs lan trust <peer> --for 8h | --forever` changes the terms later on this side.
+Upgrading does not remove an existing expiry. To remove one, run
+`ocs lan trust <peer> --forever` on both computers, using each computer's local peer label.
 Without a terminal (e.g. an agent ran `ocs lan pair`), approve with `ocs lan approve <code>`.
 Peers on ocs 0.6/0.7 can still pair with the old one-time code: `ocs lan pair --code` there or here.
 

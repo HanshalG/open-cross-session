@@ -100,8 +100,8 @@ const en: LanCatalog = {
       Start the LAN daemon (off by default). Only paired machines can reach your agents.
   ocs lan pair [--once] [--for <30m|8h|7d> | --forever] [--label <name>]
       Print a pairing text to send to the other person and wait for their request;
-      you confirm it by comparing a 6-digit code. Trust lasts 8h unless you say otherwise
-      (--forever is meant for your own devices).
+      you confirm it by comparing a 6-digit code. Trust lasts until you unpair;
+      --for sets an expiry and --once limits it to one message.
   ocs lan join <key> [--addr <host:port>[,…]] [--label <name>]   the command inside that text
   ocs lan approve <6-digit code> | reject       answer a request when \`pair\` has no terminal
   ocs lan trust <peer> --once | --for <d> | --forever   change how long this machine trusts a peer
@@ -232,7 +232,7 @@ const zh: LanCatalog = {
       启动局域网守护进程（默认关闭）。只有配对过的机器能找到你的 agent
   ocs lan pair [--once] [--for <30m|8h|7d> | --forever] [--label <名字>]
       打印一段配对文字发给对方，等对方发来请求；你核对 6 位核对码后确认。
-      默认信任 8 小时（--forever 留给自己的设备）
+      默认持续信任，直到取消配对；--for 设置期限，--once 限制为一条消息
   ocs lan join <公钥> [--addr <host:port>[,…]] [--label <名字>]   配对文字里的那条命令
   ocs lan approve <6 位核对码> | reject        \`pair\` 没有终端可交互时用来确认 / 拒绝
   ocs lan trust <对端> --once | --for <时长> | --forever   改本机对某个对端的信任期限

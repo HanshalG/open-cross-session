@@ -45,7 +45,7 @@ A 那边被唤醒的会话看到发送者是 `claude-9f8e7d6c@laptop`，`Reply:`
 | Impostor answers a `join` (0.8+) | The pairing text carries 100 bits of the inviter's fingerprint; the requester pins it in the handshake and sends neither its identity nor the request on mismatch |
 | Stranger slips in a pairing request (0.8+) | Requests are only accepted while `ocs lan pair` is waiting, one at a time; the inviter's human must see the same 6-digit check code (derived from that connection's transcript and session key) as the requester before trusting it |
 | Stranger pops prompts on an idle machine (0.8+) | No open invitation → immediate `no-offer`; request rate shares the 10/min/IP pairing limit |
-| Trust outlives its purpose (0.8+) | Pairing grants 8 h by default (`--once`, `--for`, `--forever`); expired or used-up peers are unpaired at the handshake and pruned on the next trust-store write |
+| Trust outlives its purpose (0.8+) | Pairing persists until explicitly unpaired; optional `--once` or `--for` limits are enforced at the handshake and pruned on the next trust-store write |
 | 远端冒充本机会话名 | 发送者一律显示 `<对方地址>@<本机给对端起的 label>`，label 远端改不了 |
 | 正文闭合包装标签、伪造 `Reply:` 行 | 唤醒 note 里正文的 `<cross-session-message` 被中和成 `‹…`，行首形似 `Reply:` / `Thread:` / 唤醒首行的加 `> `（wake-protocol §1）；Codex queue / Pi / cmux 这类没有包装的载体同样生效 |
 | 远端随手造频道塞满磁盘 | 远端 DM 只投活目标（Claude 活会话或登记过的 ocs 名字；Codex 要有活进程持有 rollout；Pi 要有活登记；Hermes 要宿主此刻列为打开），其余 `not-found` 不落盘；每对端限速 30 条突发、0.5 条/秒，且每 UTC 日正文 ≤16 MiB |
@@ -162,8 +162,8 @@ as `old-peer`.
 ## Trust periods (0.8+)
 
 `peers.json` entries may carry `expires_at` (ISO time) and `uses_left` (DMs still accepted).
-Absent means permanent, which is what every pre-0.8 entry is. The inviter picks the period —
-default 8 h, `--for 30m|8h|7d`, `--once` (1 DM, combinable with `--for`), `--forever` — and
+Absent means permanent. The inviter picks the period —
+permanent by default, `--for 30m|8h|7d`, `--once` (1 DM, combinable with `--for`), `--forever` — and
 returns it in the pairing reply so the joiner trusts it back for the same period.
 
 - An inactive peer (expired, or `uses_left` 0) is `paired:false` at the handshake, so `who` and
@@ -173,6 +173,8 @@ returns it in the pairing reply so the joiner trusts it back for the same period
   through.
 - Every trust-store write drops inactive entries; `ocs lan peers` prunes and reports them.
 - `ocs lan trust <peer> --once | --for <d> | --forever` rewrites this machine's period only.
+- Existing timed entries retain their expiry after an upgrade. Removing it requires
+  `ocs lan trust <peer> --forever` on each side, using that side's local peer label.
 
 ## 发现
 

@@ -37,8 +37,6 @@ export const LAN_DEFAULT_PORT = 47890;
 export const PAIR_OFFER_TTL_MS = 10 * 60 * 1000;
 /** 一份邀请最多容忍这么多次错码，之后作废——56 位令牌只给在线猜这几次机会。 */
 export const PAIR_MAX_FAILURES = 5;
-/** Trust granted when pairing without a period flag: 8 hours (a working day). Permanent needs --forever. */
-export const DEFAULT_PEER_TTL_MS = 8 * 60 * 60 * 1000;
 
 export function lanDir(env: NodeJS.ProcessEnv = process.env): string {
   return join(ocsHome(env), "lan");
@@ -183,7 +181,7 @@ export interface LanPeer {
   addrs: string[];
   paired_at: string;
   last_seen?: string;
-  /** When trust ends; absent = permanent (own devices, or anything paired before 0.8). */
+  /** When trust ends; absent = permanent. */
   expires_at?: string;
   /** DMs still accepted; absent = unlimited. Inactive at 0 (`--once` pairs with 1). */
   uses_left?: number;
@@ -195,7 +193,7 @@ export interface PeerGrant {
   uses: number | null;
 }
 
-export const DEFAULT_PEER_GRANT: PeerGrant = { ttl_ms: DEFAULT_PEER_TTL_MS, uses: null };
+export const DEFAULT_PEER_GRANT: PeerGrant = { ttl_ms: null, uses: null };
 
 /** A period as stored in the trust store (absolute time). */
 export interface PeerTerms {

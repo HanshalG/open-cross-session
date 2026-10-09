@@ -85,7 +85,7 @@ const DURATION_UNIT_MS = { m: 60_000, h: 3_600_000, d: 86_400_000 } as const;
 /**
  * Trust period flags shared by `pair`, `join`-less issuing and `trust`:
  * --forever | [--once] [--for <30m|8h|7d>]. Nothing given → `fallback`
- * (8 hours for pairing); `null` fallback means "a flag is required".
+ * (permanent for pairing); `null` fallback means "a flag is required".
  */
 function parseGrant(ctx: LanCliContext, fallback: PeerGrant | null): PeerGrant {
   const L = lanMessages(ctx.lang);

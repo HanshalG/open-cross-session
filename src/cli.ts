@@ -1414,8 +1414,10 @@ ocs dm <address>@<peer> "<text>" # message + wake an agent on a paired machine
 - LAN (opt-in): \`<address>@<peer>\` reaches an agent on another machine the user paired
   with \`ocs lan pair\`. A wake note from such a sender shows \`x@peer\` and its \`Reply:\` line
   already routes back. Only run \`ocs lan up\` / \`ocs lan pair\` / \`ocs lan join\` when the user asks:
-  pairing lets that machine prompt this machine's agents. Trust is temporary by default (8h);
-  use \`--forever\` only when the user says the other machine is their own. Never run
+  pairing lets that machine prompt this machine's agents. Trust persists until unpaired;
+  use \`--for\` or \`--once\` when the user wants a limit. For existing timed pairings,
+  \`ocs lan trust <peer> --forever\` removes this side's expiry when the user asks.
+  The other computer must change its own terms separately. Never run
   \`ocs lan approve\` on your own judgement — only with the exact 6-digit code the user says they
   compared with the other person. Never pass a pairing code or pairing text on to anyone else.
 - \`ocs doctor --fix\` is the one-step setup repair: it refreshes the Claude,
