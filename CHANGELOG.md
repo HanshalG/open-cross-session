@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.5
+
+Binary-only upgrades preserve agent skills and report setup accurately.
+
+- `OCS_INSTALL_SKILLS=0 ocs upgrade` skips all skill refresh steps, including Git checkouts and Claude plugins, matching the binary-only installer option.
+- Upgrades no longer claim installer-managed skills were refreshed when their setup was skipped or failed. The installer's actual result and any setup warning remain visible.
+- The installer announcement shows the script path or URL rather than a shell pipeline that differs from the actual download-and-run process.
+
 ## 0.8.4
 
 Reliable updates for Git-backed agent skills.

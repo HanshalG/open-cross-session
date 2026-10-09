@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { OCS_VERSION } from "../src/cli.ts";
 import {
@@ -110,6 +110,41 @@ describe("checkUpgrade（本地假 GitHub）", () => {
 });
 
 describe("ocs upgrade（端到端，假 GitHub + 假 installer）", () => {
+  test("skipped skill installation does not report unchanged skills as refreshed", async () => {
+    const home = tempDir("ocs-upgrade-skipped-skills-");
+    const skill = join(home, ".codex", "skills", "ocs", "SKILL.md");
+    mkdirSync(join(home, ".codex", "skills", "ocs"), { recursive: true });
+    writeFileSync(skill, "earlier skill instructions\n");
+    const gh = fakeGithub({ tag: `v${bump(OCS_VERSION, 1)}` });
+    const inst = fakeInstaller(0);
+    const r = await runCli(["upgrade"], {
+      HOME: home, OCS_INSTALL_SKILLS: "0",
+      [OCS_UPGRADE_LATEST_URL_ENV]: gh.url, [OCS_UPGRADE_INSTALLER_ENV]: inst.path,
+    });
+    expect(r.code).toBe(0);
+    expect(existsSync(inst.marker)).toBe(true);
+    expect(readFileSync(skill, "utf8")).toBe("earlier skill instructions\n");
+    expect(r.stdout).not.toContain("refreshed");
+  }, T);
+
+  test("optional skill setup failure remains visible without a contradictory success claim", async () => {
+    const home = tempDir("ocs-upgrade-failed-skills-");
+    const skill = join(home, ".claude", "skills", "ocs", "SKILL.md");
+    mkdirSync(join(home, ".claude", "skills", "ocs"), { recursive: true });
+    writeFileSync(skill, "earlier skill instructions\n");
+    const gh = fakeGithub({ tag: `v${bump(OCS_VERSION, 1)}` });
+    const inst = fakeInstaller(0);
+    writeFileSync(inst.path, "#!/bin/sh\nprintf '%s\\n' 'warning: skill setup failed; rerun: ocs skill install' >&2\nexit 0\n");
+    const r = await runCli(["upgrade"], {
+      HOME: home,
+      [OCS_UPGRADE_LATEST_URL_ENV]: gh.url, [OCS_UPGRADE_INSTALLER_ENV]: inst.path,
+    });
+    expect(r.code).toBe(0);
+    expect(readFileSync(skill, "utf8")).toBe("earlier skill instructions\n");
+    expect(r.stderr).toContain("skill setup failed; rerun: ocs skill install");
+    expect(r.stdout).not.toContain("refreshed");
+  }, T);
+
   test("failed installer download reports failure instead of a successful upgrade", async () => {
     const gh = fakeGithub({ tag: `v${bump(OCS_VERSION, 1)}` });
     const bin = tempDir("ocs-upgrade-curl-failure-");

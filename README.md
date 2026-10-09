@@ -125,6 +125,12 @@ setup. To install only the binary:
 curl -fsSL https://raw.githubusercontent.com/HanshalG/open-cross-session/main/install.sh | OCS_INSTALL_SKILLS=0 sh
 ```
 
+For a binary-only upgrade that leaves existing skills and skill checkouts untouched:
+
+```bash
+OCS_INSTALL_SKILLS=0 ocs upgrade
+```
+
 From source: `bun install && bun link && ocs skill install`.
 
 ## Quick start

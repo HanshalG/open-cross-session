@@ -127,7 +127,7 @@ import {
   upgradeCheckEnabled,
 } from "./upgrade.ts";
 
-export const OCS_VERSION = "0.8.4";
+export const OCS_VERSION = "0.8.5";
 
 const LANG = detectLang();
 const M = messages(LANG);
@@ -1099,14 +1099,13 @@ async function cmdUpgrade(parsed: Parsed): Promise<void> {
   // installer 自带 sha256 校验 + 冒烟 + 原子替换；失败时现有二进制不受影响。
   const local = process.env[OCS_UPGRADE_INSTALLER_ENV];
   console.log(M.upgradeRunning(
-    local ? `sh ${local}`
-      : process.platform === "win32" ? `irm ${OCS_INSTALL_PS1_URL} | iex`
-      : `curl -fsSL ${OCS_INSTALL_SCRIPT_URL} | sh`,
+    local || (process.platform === "win32" ? OCS_INSTALL_PS1_URL : OCS_INSTALL_SCRIPT_URL),
   ));
   const run = runInstaller();
   if (run.code === 0) {
-    // 约定 §3：二进制换了，别处拷贝/检出/插件里的 SKILL.md 不会跟着动，逐个刷新。
-    for (const line of refreshSkills(detectSkillChannels())) console.log(line);
+    if (process.env.OCS_INSTALL_SKILLS !== "0") {
+      for (const line of refreshSkills(detectSkillChannels())) console.log(line);
+    }
     console.log(M.upgradeDone);
     console.log(M.upgradePartyHint);
   } else {

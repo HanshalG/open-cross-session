@@ -172,7 +172,7 @@ export function detectSkillChannels(home: string = homedir()): SkillChannel[] {
   return found;
 }
 
-/** 升级后刷新：插件走 claude CLI、git 检出 pull、installer 那份 install 脚本已经重写过、copied 只提示。 */
+/** Refresh plugin and Git skills; copied skills receive manual update guidance. */
 export function refreshSkills(channels: readonly SkillChannel[]): string[] {
   const lines: string[] = [];
   for (const skill of channels) {
@@ -193,8 +193,6 @@ export function refreshSkills(channels: readonly SkillChannel[]): string[] {
         : `skill (git-checkout ${skill.path}): not updated (${(out.stderr ?? "").trim() || "local changes?"})`);
     } else if (skill.channel === "copied") {
       lines.push(`skill (copied ${skill.path}): run \`${skill.update}\``);
-    } else {
-      lines.push(`skill (${skill.path}): refreshed by the installer`);
     }
   }
   return lines;

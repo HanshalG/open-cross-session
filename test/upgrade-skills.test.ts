@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { detectSkillChannels, refreshSkills } from "../src/upgrade.ts";
+import { OCS_VERSION } from "../src/cli.ts";
 import { autoCleanupTempDirs, tempDir } from "./tmp";
 
 autoCleanupTempDirs();
@@ -89,5 +90,31 @@ describe("Git skill upgrades", () => {
     unlinkSync(f.skill);
     expect(refreshSkills(channels)[0]).toContain(": not updated");
     expect(git(f.checkout, ["rev-parse", "HEAD"])).toBe(head);
+  });
+
+  test("a binary-only CLI upgrade leaves Git-backed skills untouched", async () => {
+    const f = fixture();
+    const head = git(f.checkout, ["rev-parse", "HEAD"]);
+    const [major, minor, patch] = OCS_VERSION.split(".").map(Number);
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: () => Response.json({ tag_name: `v${major}.${minor}.${patch! + 1}` }),
+    });
+    const installer = join(tempDir("ocs-upgrade-binary-only-"), "install.sh");
+    writeFileSync(installer, "#!/bin/sh\nexit 0\n");
+    try {
+      const child = Bun.spawn([process.execPath, join(import.meta.dir, "..", "src", "cli.ts"), "upgrade"], {
+        env: { ...process.env, HOME: f.home, OCS_INSTALL_SKILLS: "0", OCS_HOME: join(f.home, "ocs"),
+          OCS_UPGRADE_INSTALLER: installer, OCS_UPGRADE_LATEST_URL: `http://127.0.0.1:${server.port}/latest` },
+        stdout: "pipe", stderr: "pipe",
+      });
+      const [code] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+      expect(code).toBe(0);
+      expect(readFileSync(join(f.skill, "SKILL.md"), "utf8")).toBe("initial skill\n");
+      expect(git(f.checkout, ["rev-parse", "HEAD"])).toBe(head);
+    } finally {
+      server.stop(true);
+    }
   });
 });

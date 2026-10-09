@@ -104,6 +104,12 @@ Claude Code、Codex、Pi 注册与二进制同版本的 ocs skill：有 `npx` �
 curl -fsSL https://raw.githubusercontent.com/HanshalG/open-cross-session/main/install.sh | OCS_INSTALL_SKILLS=0 sh
 ```
 
+只升级二进制并保留现有 skill 和其 Git 检出：
+
+```bash
+OCS_INSTALL_SKILLS=0 ocs upgrade
+```
+
 源码方式：`bun install && bun link && ocs skill install`。
 
 ## 上手
