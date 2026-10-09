@@ -42,6 +42,17 @@ describe("desktop roster titles", () => {
     expect(rows.map((r) => [r.threadId, r.summary])).toEqual([[A, "Audit pilot prompts"]]);
   });
 
+  test("keeps older user chats beyond the former 128-candidate cutoff", () => {
+    const f = fixture();
+    add(f, A, "Older open chat");
+    for (let i = 0; i < 129; i++) add(f, randomUUID(), "Newer chat");
+    f.db.query("UPDATE threads SET recency_at_ms = 2 WHERE id != ?").run(A);
+    f.db.close();
+    const rows = listCodexRosterSessions(f.root);
+    expect(rows).toHaveLength(130);
+    expect(rows.at(-1)?.threadId).toBe(A);
+  });
+
   test("ignores archived chats and rollouts outside the sessions root", () => {
     const f = fixture();
     add(f, A, "Archived chat");

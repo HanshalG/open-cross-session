@@ -16,7 +16,7 @@ interface IndexedThread {
 
 export function listCodexRosterSessions(root: string): CodexSessionSummary[] {
   const path = join(dirname(root), "state_5.sqlite");
-  if (!existsSync(path)) return listCodexSessions(root, { limit: 128 });
+  if (!existsSync(path)) return listCodexSessions(root, { limit: Infinity });
   let db: Database | undefined;
   try {
     db = new Database(path, { readonly: true, create: false });
@@ -25,7 +25,6 @@ export function listCodexRosterSessions(root: string): CodexSessionSummary[] {
       FROM threads
       WHERE archived = 0 AND COALESCE(thread_source, 'user') = 'user'
       ORDER BY COALESCE(recency_at_ms, updated_at_ms, updated_at * 1000) DESC
-      LIMIT 128
     `).all() as IndexedThread[];
     return rows.filter((row) => isCodexThreadId(row.id) &&
       resolve(row.rollout_path).startsWith(resolve(root) + sep) && existsSync(row.rollout_path))
@@ -37,7 +36,7 @@ export function listCodexRosterSessions(root: string): CodexSessionSummary[] {
         summary: rosterTitle(row),
       }));
   } catch {
-    return listCodexSessions(root, { limit: 128 });
+    return listCodexSessions(root, { limit: Infinity });
   } finally {
     db?.close();
   }

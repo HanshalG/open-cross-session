@@ -610,7 +610,7 @@ export class CodexDesktopIpcClient implements CodexDesktopIpcTransport {
 /**
  * Snapshot the subset of rollout ids that an open Desktop renderer actually
  * claims. Unclaimed ids intentionally time out in current ChatGPT builds, so
- * probes run concurrently under one short deadline instead of serially.
+ * probes run with bounded concurrency and a short timeout per candidate.
  */
 export async function discoverCodexDesktopOwners(
   threadIds: readonly string[],
@@ -622,14 +622,21 @@ export async function discoverCodexDesktopOwners(
   });
   try {
     await client.connect();
-    const pairs = await Promise.all([...new Set(threadIds.map((id) => id.toLowerCase()))].map(async (id) => {
-      try {
-        return [id, await client.discoverThreadOwner(id)] as const;
-      } catch {
-        return null;
+    const ids = [...new Set(threadIds.map((id) => id.toLowerCase()))];
+    const owners: Record<string, string> = {};
+    let next = 0;
+    const probe = async (): Promise<void> => {
+      while (next < ids.length) {
+        const id = ids[next++]!;
+        try {
+          owners[id] = await client.discoverThreadOwner(id);
+        } catch {
+          // A closed chat must not stop discovery of the remaining candidates.
+        }
       }
-    }));
-    return Object.fromEntries(pairs.filter((pair): pair is readonly [string, string] => pair !== null));
+    };
+    await Promise.all(Array.from({ length: Math.min(128, ids.length) }, probe));
+    return owners;
   } finally {
     client.close();
   }

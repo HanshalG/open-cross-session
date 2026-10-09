@@ -4,6 +4,7 @@ import { createServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { codexSessionsRoot, listCodexSessions } from "../src/codex-sessions.ts";
+import { lanWhoEntries } from "../src/lan-daemon.ts";
 import { discoverCodexDesktopOwners } from "../src/codex-ipc.ts";
 import { appendMessage, readMessages } from "../src/store.ts";
 import { pickCodexSourceThread, splitWakeMentions, wakeCodexTask } from "../src/wake.ts";
@@ -86,6 +87,7 @@ function encodeFrame(value: unknown): Buffer {
 function fakeRouter(
   options: {
     ownerOf?: (threadId: string) => string;
+    scheduleOwnerReply?: (reply: () => void) => void;
     withThreadC?: boolean;
     ignoreOwnerFor?: ReadonlySet<string>;
     startTurnWithoutId?: boolean;
@@ -120,7 +122,9 @@ function fakeRouter(
           else setTimeout(send, options.delayInitializeMs);
         } else if (message.method === "thread-owner-discovery") {
           if (options.ignoreOwnerFor?.has(params.conversationId as string)) continue;
-          reply({ handledByClientId: ownerOf(params.conversationId as string) });
+          const send = () => reply({ handledByClientId: ownerOf(params.conversationId as string) });
+          if (options.scheduleOwnerReply === undefined) send();
+          else options.scheduleOwnerReply(send);
         } else if (message.method === "thread-follower-start-turn") {
           startTurnRequests.push(params);
           reply({
@@ -355,6 +359,44 @@ echo "Queued message 01a079c9-7318-7192-ae2c-8078515ad91a for thread $3."
       router.close();
     }
   });
+
+  test("owner discovery reaches candidates after a full batch of closed chats", async () => {
+    const closed = Array.from({ length: 128 }, (_, i) => `${i.toString(16).padStart(8, "0")}-1111-2222-3333-444444444444`);
+    const router = fakeRouter({ ignoreOwnerFor: new Set(closed) });
+    try {
+      const owners = await discoverCodexDesktopOwners([...closed, THREAD_B], { env: router.env, timeoutMs: 50 });
+      expect(owners).toEqual({ [THREAD_B]: "renderer-1" });
+    } finally {
+      router.close();
+    }
+  });
+
+  test("owner discovery bounds outstanding requests while visiting every chat", async () => {
+    let pending = 0;
+    let maximum = 0;
+    const router = fakeRouter({ scheduleOwnerReply: (reply) => {
+      maximum = Math.max(maximum, ++pending);
+      setImmediate(() => { pending--; reply(); });
+    } });
+    const ids = Array.from({ length: 260 }, (_, i) => `${i.toString(16).padStart(8, "0")}-1111-2222-3333-444444444444`);
+    try {
+      const owners = await discoverCodexDesktopOwners(ids, { env: router.env, timeoutMs: 1000 });
+      expect(Object.keys(owners)).toHaveLength(ids.length);
+      expect(maximum).toBeLessThanOrEqual(128);
+      expect(pending).toBe(0);
+    } finally { router.close(); }
+  });
+
+  test("LAN discovery retains an older open chat beyond 128 closed rollouts", async () => {
+    const closed = Array.from({ length: 129 }, (_, i) => `${i.toString(16).padStart(8, "0")}-1111-2222-3333-444444444444`);
+    const router = fakeRouter({ ignoreOwnerFor: new Set([THREAD_A, ...closed]) });
+    const root = join(router.env.CODEX_HOME!, "sessions", "2026", "08", "31");
+    for (const id of closed) writeFileSync(join(root, `rollout-2026-08-31T12-00-00-${id}.jsonl`), JSON.stringify({ type: "session_meta", payload: { id, cwd: "/fixture" } }) + "\n");
+    try {
+      const entries = await lanWhoEntries({ ...router.env, OCS_HOME: join(router.env.CODEX_HOME!, "ocs") });
+      expect(entries.filter((entry) => entry.kind === "codex").map((entry) => entry.address)).toEqual(["hello-world"]);
+    } finally { router.close(); }
+  }, T);
 
   test("同 renderer：turn 被接受，toolOutput 走 codex_app/send_message_to_thread", async () => {
     const router = fakeRouter();
