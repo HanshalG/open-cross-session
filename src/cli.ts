@@ -88,6 +88,7 @@ import {
   claudeSessionIdentity,
   selfNameOwner,
   shadowFreeWorkspaceAlias,
+  type RosterEntry,
   CODEX_THREAD_ID_ENV,
   OCS_NAME_ENV,
 } from "./roster.ts";
@@ -128,7 +129,7 @@ import {
   upgradeCheckEnabled,
 } from "./upgrade.ts";
 
-export const OCS_VERSION = "0.8.14";
+export const OCS_VERSION = "0.8.15";
 
 const LANG = detectLang();
 const M = messages(LANG);
@@ -289,6 +290,14 @@ function markStoredDeliveryFailure(outcome: StoredDeliveryFailure): void {
 }
 
 const CLI_SINK: DeliverySink = { log: (line) => console.log(line), fail: markStoredDeliveryFailure };
+
+type CodexQueueWarningEntry = Pick<Extract<RosterEntry, { kind: "codex-task" }>, "kind" | "livePid" | "hostApp">;
+
+export function needsCodexQueueWarning(queueAvailable: boolean, entries: readonly CodexQueueWarningEntry[]): boolean {
+  return !queueAvailable && entries.some((entry) =>
+    entry.kind === "codex-task" && entry.livePid !== null && entry.hostApp !== "ChatGPT"
+  );
+}
 
 /** Resolve the full UUID or the exact short address printed by `ocs who`. */
 function resolveCodexFlagAddress(flag: "codex" | "codex-source", value: string): string {
@@ -844,10 +853,11 @@ async function cmdWhoLocal(parsed: Parsed): Promise<void> {
     for (const e of codex) {
       if (e.kind !== "codex-task") continue;
       const label = e.summary ?? (e.cwd === null ? "" : basename(e.cwd));
-      // 载体标注：queue 走官方 CLI（终端 TUI 也吃），desktop 是私有 IPC 降级路径。
       const via = e.livePid === null
         ? M.whoCodexViaDesktop
-        : M.whoCodexViaQueue(e.livePid, e.hostApp, e.tty);
+        : e.hostApp === "ChatGPT"
+          ? M.whoCodexViaDesktopHost(e.livePid, e.hostApp, e.tty)
+          : M.whoCodexViaQueue(e.livePid, e.hostApp, e.tty);
       const named = e.ocsName === undefined ? "" : `${e.ocsName}  `;
       console.log(
         verbose
@@ -860,8 +870,7 @@ async function cmdWhoLocal(parsed: Parsed): Promise<void> {
   }
   // 静默降级最难查：`codex` 是 shell 函数/别名时探测判不可用，终端里活着的 codex 就
   // 只能靠 IPC/cmux 够——而它们够不着终端。有活的非 Desktop 目标时必须把这句说出来。
-  if (!roster.codexQueue &&
-      codex.some((entry) => entry.kind === "codex-task" && entry.livePid !== null)) {
+  if (needsCodexQueueWarning(roster.codexQueue, codex)) {
     console.log(M.whoCodexQueueMissing);
   }
   if (pi.length > 0) {

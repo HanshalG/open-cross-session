@@ -521,6 +521,36 @@ echo "Queued message 11111111-1111-2222-3333-444444444444 for thread $3."
     }
   }, T);
 
+  test("远端 DM 到已登记但离线的 Claude 名字：落盘但回传 wake failed", async () => {
+    const a = machine("mini");
+    const b = machine("laptop");
+    const server = await serve(a);
+    const worker = fakeClaude(a, "offline-worker", "ae38e21b-1111-2222-3333-444455556666");
+    let workerClosed = false;
+    try {
+      const session = listNativeSessions(a.env).find((candidate) => candidate.sessionId === "ae38e21b-1111-2222-3333-444455556666");
+      if (session === undefined) throw new Error("fake Claude session is missing");
+      expect(setOcsName("offline-worker", { kind: "claude", session }, { env: a.env }).ok).toBe(true);
+      worker.close();
+      workerClosed = true;
+      await waitFor(() => listNativeSessions(a.env).some((candidate) => candidate.sessionId === session.sessionId) ? undefined : true);
+      await pairMachines(a, b, server);
+      const peer = findPeer("srv", b.env)!;
+      const result = await sendRemoteDm(peer, b.identity, {
+        from: "alice", from_key: "alice", to: "offline-worker", body: "please resume", lang: "en",
+      }, b.env);
+
+      expect(result).toMatchObject({ delivered: true, reply: { ok: true, seq: 1, outcome: "failed" } });
+      if (result.delivered !== true || !result.reply.ok) throw new Error("offline DM was not stored");
+      expect(result.reply.lines.join("\n")).toContain("NOT woken");
+      expect(readRoutedMessages(result.reply.channel, { env: a.env }).map((message) => message.body)).toEqual(["please resume"]);
+      expect(worker.frames).toEqual([]);
+    } finally {
+      if (!workerClosed) worker.close();
+      await server.close();
+    }
+  }, T);
+
   test("远端 DM 找不到目标：不落盘、如实回 not-found；任意名字不许造频道", async () => {
     const a = machine("mini");
     const b = machine("laptop");

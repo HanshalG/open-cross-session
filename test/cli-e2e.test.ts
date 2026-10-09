@@ -209,7 +209,7 @@ describe("inbox 离线续接", () => {
     const f = fixture();
     try {
       const sent = await run(f, ["dm", "offline-bob", "please resume", "--as", "alice"]);
-      expect({ code: sent.code, stderr: sent.stderr }).toEqual({ code: 0, stderr: "" });
+      expect({ code: sent.code, stderr: sent.stderr }).toEqual({ code: 2, stderr: "" });
       expect(sent.stdout).toContain("NOT woken");
 
       const inbox = await run(f, ["inbox", "--as", "offline-bob"]);
@@ -277,7 +277,7 @@ describe("inbox 离线续接", () => {
       mkdirSync(f.home, { recursive: true });
       writeFileSync(join(f.home, "cursors"), "not a directory");
       const sent = await run(f, ["dm", "offline-bob", "stored once", "--as", "alice"]);
-      expect({ code: sent.code, stderr: sent.stderr }).toEqual({ code: 0, stderr: "" });
+      expect({ code: sent.code, stderr: sent.stderr }).toEqual({ code: 2, stderr: "" });
       expect(sent.stdout).toContain("message is stored, but the sender cursor could not be advanced");
       expect(sent.stdout).toContain("NOT woken");
       const channel = /channel (dm-[^,\s)]+)/.exec(sent.stdout)?.[1];

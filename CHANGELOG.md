@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.15
+
+Offline Claude DMs report their stored-but-not-woken outcome, and Codex discovery describes Desktop delivery accurately.
+
+- A DM to a registered offline Claude alias remains stored, but reports `failed` and exits 2 rather than claiming a successful wake. No wake attempt or automatic retry is added. Local CLI and paired-LAN regressions verify the outcome and preserved message.
+- Live Desktop-hosted Codex chats show Desktop IPC first with cmux/queue fallback. A missing queue command warns only about live terminal chats that need it, rather than claiming Desktop chats cannot be woken.
+
 ## 0.8.14
 
 LAN discovery distinguishes missing trust from a network outage, and Windows installation handles an absent user-level PATH.

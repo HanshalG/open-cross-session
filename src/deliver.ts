@@ -380,6 +380,7 @@ export async function deliverDm(
           ? (input.firstMessage ? M.dmParkedNew(target, channel) : M.dmParked(target, channel))
           : M.dmParkedStable(target, channel),
       );
+      sink.fail("failed");
       return null;
     }
     const claudeInput: WakeInput = {

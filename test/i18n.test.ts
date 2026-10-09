@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { detectLang, messages } from "../src/i18n.ts";
+import { needsCodexQueueWarning } from "../src/cli.ts";
 import { wakeNote, WAKE_NOTE_MAX_BYTES } from "../src/wake.ts";
 
 describe("detectLang", () => {
@@ -24,6 +25,40 @@ describe("messages 目录", () => {
     for (const key of Object.keys(en)) {
       expect(typeof zh[key]).toBe(typeof en[key]);
     }
+  });
+});
+
+describe("ocs who Codex route labels", () => {
+  test("ChatGPT-hosted live tasks advertise Desktop IPC first and queue fallback in both languages", () => {
+    for (const lang of ["en", "zh"] as const) {
+      const label = messages(lang).whoCodexViaDesktopHost(321, "ChatGPT", "ttys004");
+      expect(label).toContain("321");
+      expect(label).toContain("ChatGPT");
+      expect(label).toContain("ttys004");
+      if (lang === "en") {
+        expect(label).toContain("desktop first");
+        expect(label).toContain("queue fallback");
+        expect(label).toContain("cmux");
+      } else {
+        expect(label).toContain("Desktop 优先");
+        expect(label).toContain("queue 兜底");
+        expect(label).toContain("cmux");
+      }
+    }
+    expect(messages("en").whoCodexViaQueue(321, "Terminal", "ttys004")).toContain("[queue pid 321");
+  });
+
+  test("queue-unavailable warning applies only when a live non-Desktop task needs queue", () => {
+    const desktop = {
+      kind: "codex-task" as const,
+      livePid: 321,
+      hostApp: "ChatGPT",
+    };
+    const terminal = { ...desktop, livePid: 654, hostApp: "Terminal" };
+    expect(needsCodexQueueWarning(false, [desktop])).toBe(false);
+    expect(needsCodexQueueWarning(false, [desktop, terminal])).toBe(true);
+    expect(needsCodexQueueWarning(true, [terminal])).toBe(false);
+    expect(needsCodexQueueWarning(false, [{ ...desktop, livePid: null }])).toBe(false);
   });
 });
 

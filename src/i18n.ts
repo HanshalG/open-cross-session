@@ -161,6 +161,7 @@ interface Catalog {
   whoCodexHeader: (ipc: boolean) => string;
   whoCodexNone: (ipc: boolean) => string;
   whoCodexViaQueue: (pid: number, host: string | null, tty: string | null) => string;
+  whoCodexViaDesktopHost: (pid: number, host: string | null, tty: string | null) => string;
   whoCodexViaDesktop: string;
   whoCodexQueueMissing: string;
   whoPiHeader: string;
@@ -470,6 +471,10 @@ Details: https://github.com/HanshalG/open-cross-session/blob/main/docs/lan.md`,
     // 所以这里报进程事实：宿主应用 + 控制终端，查不到就只留 pid。
     const where = [host, tty].filter((part) => part !== null).join(" ");
     return `[queue pid ${pid}${where === "" ? "" : ` · ${where}`}]`;
+  },
+  whoCodexViaDesktopHost: (pid, host, tty) => {
+    const where = [host, tty].filter((part) => part !== null).join(" ");
+    return `[desktop first; cmux/queue fallback · pid ${pid}${where === "" ? "" : ` · ${where}`}]`;
   },
   whoCodexViaDesktop: "[desktop]",
   whoCodexQueueMissing:
@@ -781,6 +786,10 @@ ${lanMessages("zh").help}
   whoCodexViaQueue: (pid, host, tty) => {
     const where = [host, tty].filter((part) => part !== null).join(" ");
     return `[queue pid ${pid}${where === "" ? "" : ` · ${where}`}]`;
+  },
+  whoCodexViaDesktopHost: (pid, host, tty) => {
+    const where = [host, tty].filter((part) => part !== null).join(" ");
+    return `[Desktop 优先；cmux/queue 兜底 · pid ${pid}${where === "" ? "" : ` · ${where}`}]`;
   },
   whoCodexViaDesktop: "[desktop]",
   whoCodexQueueMissing:
