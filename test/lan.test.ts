@@ -20,7 +20,7 @@ import { setOcsName } from "../src/names.ts";
 import { resetCodexCliProbeCache } from "../src/codex-queue.ts";
 import { holdRolloutAsCodex } from "./codex-holder";
 import { lanChannel, scrubPids, startLanServer, type LanServerHandle } from "../src/lan-daemon.ts";
-import { pairWithCode, remoteWho, sendRemoteDm, LanClientError } from "../src/lan-client.ts";
+import { connectPeer, pairWithCode, remoteWho, sendRemoteDm, LanClientError } from "../src/lan-client.ts";
 import {
   createPairOffer,
   findPeer,
@@ -255,6 +255,27 @@ describe("身份与信任库文件", () => {
     writeFileSync(path, JSON.stringify(raw), { mode: 0o600 });
     expect(() => listPeers(m.env)).toThrow("malformed entries");
   });
+});
+
+describe("connection diagnostics", () => {
+  test("reports a closed handshake without deleting pairing", async () => {
+    const a = machine("diagnostic-client");
+    const b = machine("diagnostic-server");
+    const server = createServer((socket) => socket.once("data", () => socket.destroy()));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (address === null || typeof address === "string") throw new Error("missing test listener");
+      const addr = `127.0.0.1:${address.port}`;
+      const peer = trustPeer({ key: b.identity.publicKey, name: "diagnostic-server", addr }, a.env);
+      const error = await connectPeer(peer, a.identity, a.env, { scanTimeoutMs: 1 }).catch((value) => value);
+      expect(error).toBeInstanceOf(LanClientError);
+      expect(error.message).toContain(`${addr}: closed`);
+      expect(findPeer(peer.label, a.env)?.fingerprint).toBe(b.identity.fingerprint);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }, T);
 });
 
 describe("配对", () => {

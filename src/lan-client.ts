@@ -39,6 +39,7 @@ async function tryConnect(
   expect: ServerExpectation,
   env: NodeJS.ProcessEnv,
   mismatches: string[],
+  failures?: string[],
 ): Promise<{ conn: ClientConnection; addr: string } | null> {
   for (const addr of addrs) {
     const parsed = parseHostPort(addr);
@@ -48,6 +49,8 @@ async function tryConnect(
       return { conn, addr };
     } catch (error) {
       if (error instanceof LanProtocolError && error.code === "peer-key-mismatch") mismatches.push(addr);
+      const code = error instanceof LanProtocolError ? error.code : "connect-failed";
+      failures?.push(`${addr}: ${code}`);
       // 连不上 / 超时 / 协议不符：换下一个
     }
   }
@@ -63,7 +66,8 @@ export async function connectPeer(
 ): Promise<ClientConnection> {
   const expect: ServerExpectation = { kind: "fingerprint", fingerprint: peer.fingerprint };
   const mismatches: string[] = [];
-  let hit = await tryConnect(peer.addrs, identity, expect, env, mismatches);
+  const failures: string[] = [];
+  let hit = await tryConnect(peer.addrs, identity, expect, env, mismatches, failures);
   if (hit === null) {
     const found = await scanLan({ timeoutMs: options.scanTimeoutMs ?? 1500 }, env);
     const candidates = found
@@ -72,10 +76,11 @@ export async function connectPeer(
       .filter((addr) => !peer.addrs.includes(addr))
       // 发现应答不认证、可被伪造：只试前几个，别让一堆假应答把 DM 拖上几十秒。
       .slice(0, 4);
-    hit = await tryConnect(candidates, identity, expect, env, mismatches);
+    hit = await tryConnect(candidates, identity, expect, env, mismatches, failures);
   }
   if (hit === null) {
-    throw new LanClientError("offline", `peer ${peer.label} is not reachable`, mismatches);
+    const detail = failures.length === 0 ? "no usable addresses" : failures.join("; ");
+    throw new LanClientError("offline", `peer ${peer.label} is not reachable (${detail})`, mismatches);
   }
   notePeerAddress(peer.fingerprint, hit.addr, env);
   return hit.conn;
