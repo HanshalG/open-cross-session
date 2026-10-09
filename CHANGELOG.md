@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.6
+
+LAN discovery preserves valid agents when a peer sends malformed roster entries.
+
+- Non-object and null entries are skipped instead of failing the entire peer roster.
+- Remote addresses must match the complete address format. Overlong addresses and addresses containing control characters are discarded instead of being rewritten into another routing identity.
+- Display labels and status text retain their existing sanitization and length limits.
+
 ## 0.8.5
 
 Binary-only upgrades preserve agent skills and report setup accurately.

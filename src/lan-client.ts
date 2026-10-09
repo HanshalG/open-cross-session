@@ -304,9 +304,10 @@ export async function remoteWho(
   const clean = (value: unknown, max: number) => typeof value === "string" ? cleanText(value, max) : undefined;
   const entries: LanWhoEntry[] = [];
   for (const raw of reply.entries.slice(0, 200)) {
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) continue;
     const e = raw as Record<string, unknown>;
-    const address = clean(e.address, 64);
-    if (address === undefined || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(address)) continue;
+    const address = e.address;
+    if (typeof address !== "string" || !NAME_RE.test(address)) continue;
     if (e.kind !== "claude" && e.kind !== "codex" && e.kind !== "pi" && e.kind !== "hermes") continue;
     const status = clean(e.status, 16);
     const label = clean(e.label, 60);
