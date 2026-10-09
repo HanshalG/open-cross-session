@@ -136,6 +136,7 @@ function describeClientError(ctx: LanCliContext, peer: string, error: unknown): 
   if (error instanceof LanClientError && error.mismatches.length > 0) {
     return L.keyMismatch(peer, error.mismatches.join(", "));
   }
+  if (error instanceof LanClientError && error.code === "unpaired") return L.peerUnpaired(peer);
   return L.offline(peer, error instanceof Error ? error.message : String(error));
 }
 
@@ -537,7 +538,7 @@ function lanUnpair(ctx: LanCliContext, query: string): void {
 export interface LanWhoPeer {
   peer: string;
   name: string;
-  status: "online" | "offline" | "key-mismatch";
+  status: "online" | "offline" | "key-mismatch" | "unpaired";
   entries: Awaited<ReturnType<typeof remoteWho>>["entries"];
   error?: string;
 }
@@ -560,8 +561,10 @@ export async function listLanWho(ctx: Pick<LanCliContext, "lang" | "fail">, only
       };
     } catch (error) {
       const mismatch = error instanceof LanClientError && error.mismatches.length > 0;
+      const unpaired = error instanceof LanClientError && error.code === "unpaired";
       return {
-        peer: peer.label, name: peer.name, status: mismatch ? "key-mismatch" : "offline", entries: [],
+        peer: peer.label, name: peer.name,
+        status: mismatch ? "key-mismatch" : unpaired ? "unpaired" : "offline", entries: [],
         error: mismatch ? error.mismatches.join(", ") : error instanceof Error ? error.message : String(error),
       };
     }
@@ -583,7 +586,9 @@ export async function printLanWho(ctx: Pick<LanCliContext, "lang" | "fail">, onl
     if (result.status !== "online") {
       console.log(result.status === "key-mismatch"
         ? L.keyMismatch(result.peer, result.error ?? "")
-        : L.whoOffline(result.peer, result.error ?? ""));
+        : result.status === "unpaired"
+          ? L.whoUnpaired(result.peer)
+          : L.whoOffline(result.peer, result.error ?? ""));
       continue;
     }
     console.log(L.whoHeader(result.peer, result.name));

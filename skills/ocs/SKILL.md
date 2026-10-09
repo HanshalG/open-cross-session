@@ -104,8 +104,8 @@ user authorization.
   pinned peer. Verify the intended computer and its `lan status` fingerprint
   before proposing a new human-confirmed pairing. Do not delete keys or trust
   an unexpected identity to make the error disappear.
-- An explicit `no longer trusts this machine` error indicates the remote side
-  did not grant current trust. Each computer controls its own expiry and use
+- An `unpaired` discovery status or explicit `no longer trusts this machine`
+  error indicates a reachable, authenticated peer that did not grant current trust. Each computer controls its own expiry and use
   limit; making trust permanent here does not change the other computer.
 - `closed`, `timeout`, or `connect-failed` alone does not establish a pairing or
   version mismatch. Preserve the full error and attempted address. On the

@@ -320,11 +320,25 @@ describe("ocs lan 端到端（两台机器）", () => {
       }
       expect(codexChannels[0]).not.toBe(codexChannels[1]);
 
+      // A can be reachable while no longer trusting B; report trust state, not an outage.
+      const bIdentity = loadOrCreateIdentity(b.env);
+      expect(removePeer(bIdentity.fingerprint, a.env)).toBe(true);
+      const unpairedJson = await run(b, ["lan", "who", "alpha", "--json"]);
+      expect(JSON.parse(unpairedJson.stdout)).toEqual([{
+        peer: "alpha", name: "alpha", status: "unpaired", entries: [],
+        error: "peer alpha no longer trusts this machine; pair again",
+      }]);
+      const unpairedText = await run(b, ["lan", "who", "alpha"]);
+      expect(unpairedText.stdout).toContain("reachable, but it does not currently trust this machine");
+      expect(unpairedText.stdout).not.toContain("offline");
+      trustPeer({ key: bIdentity.publicKey, name: "bravo", label: "bee", addr: `127.0.0.1:${portB}` }, a.env);
+
       // 解除配对后 A 再也进不了 B
       expect((await run(b, ["lan", "unpair", "alpha"])).code).toBe(0);
       const refused = await run(a, ["dm", "claude-bbbbbbbb@bee", "still there?"]);
       expect(refused.code).toBe(1);
-      expect(refused.stderr).toContain("no longer trusts this machine");
+      expect(refused.stderr).toContain("is reachable but does not currently trust this machine");
+      expect(refused.stderr).not.toContain("not reachable");
     } finally {
       await run(a, ["lan", "down"]);
       await run(b, ["lan", "down"]);

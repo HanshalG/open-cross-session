@@ -76,9 +76,11 @@ export interface LanCatalog {
   dmRefused: (target: string, error: string, detail: string) => string;
   dmUnknown: (peer: string, detail: string) => string;
   offline: (peer: string, detail: string) => string;
+  peerUnpaired: (peer: string) => string;
   keyMismatch: (peer: string, addrs: string) => string;
   whoHeader: (label: string, name: string) => string;
   whoOffline: (label: string, detail: string) => string;
+  whoUnpaired: (label: string) => string;
   whoEntry: (address: string, kind: string, status: string, label: string) => string;
   whoEmpty: string;
   whoNoPeers: string;
@@ -208,10 +210,12 @@ Trust: ${i.terms}. This invitation expires in ${i.minutes} min.
   dmUnknown: (peer, detail) =>
     `outcome unknown: the request reached ${peer} but no reply came back (${detail}). It may have been stored and delivered — do NOT resend; ask the peer or check \`ocs lan who ${peer}\`.`,
   offline: (peer, detail) => `lan: ${peer} is not reachable (${detail}); nothing was sent. Is \`ocs lan up\` running there?`,
+  peerUnpaired: (peer) => `lan: ${peer} is reachable but does not currently trust this machine; pair again.`,
   keyMismatch: (peer, addrs) =>
     `lan: SECURITY: ${addrs} answered with a different key than ${peer}. Its address changed, it was reinstalled, or someone is impersonating it. Nothing was sent. If it was reinstalled, \`ocs lan unpair ${peer}\` and pair again.`,
   whoHeader: (label, name) => `LAN ${label} (${name}):`,
   whoOffline: (label, detail) => `LAN ${label}: offline (${detail})`,
+  whoUnpaired: (label) => `LAN ${label}: reachable, but it does not currently trust this machine; pair again.`,
   whoEntry: (address, kind, status, label) => `  ${address}  ${kind}${status === "" ? "" : `  ${status}`}${label === "" ? "" : `  ${label}`}`,
   whoEmpty: "  (no reachable agents)",
   whoNoPeers: "LAN: no paired peers (see `ocs lan pair`)",
@@ -340,10 +344,12 @@ const zh: LanCatalog = {
   dmUnknown: (peer, detail) =>
     `结果未知：请求已到达 ${peer} 但没收到应答（${detail}）。可能已经落盘并唤醒——不要重发；问对方或查 \`ocs lan who ${peer}\`。`,
   offline: (peer, detail) => `lan: 连不上 ${peer}（${detail}），什么都没发。对方跑着 \`ocs lan up\` 吗？`,
+  peerUnpaired: (peer) => `lan: ${peer} 可以连接，但目前不信任这台机器；请重新配对。`,
   keyMismatch: (peer, addrs) =>
     `lan: 安全警告：${addrs} 应答的公钥和 ${peer} 的不一致。可能是地址换了、对方重装了，或者有人冒充。什么都没发。确认是重装的话：\`ocs lan unpair ${peer}\` 后重新配对。`,
   whoHeader: (label, name) => `局域网 ${label}（${name}）：`,
   whoOffline: (label, detail) => `局域网 ${label}：离线（${detail}）`,
+  whoUnpaired: (label) => `局域网 ${label}：可以连接，但目前不信任这台机器；请重新配对。`,
   whoEntry: (address, kind, status, label) => `  ${address}  ${kind}${status === "" ? "" : `  ${status}`}${label === "" ? "" : `  ${label}`}`,
   whoEmpty: "  （没有可达的 agent）",
   whoNoPeers: "局域网：没有已配对的对端（见 `ocs lan pair`）",
