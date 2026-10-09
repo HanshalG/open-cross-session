@@ -127,7 +127,7 @@ import {
   upgradeCheckEnabled,
 } from "./upgrade.ts";
 
-export const OCS_VERSION = "0.8.9";
+export const OCS_VERSION = "0.8.10";
 
 const LANG = detectLang();
 const M = messages(LANG);

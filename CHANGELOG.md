@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.10
+
+LAN connection failures show the attempted address and handshake failure type, making offline reports easier to diagnose without discarding pairing.
+
+- Installation stops when checksum calculation fails, even if the checksum tool printed a matching digest. The previous binary remains installed.
+- macOS checksum and extraction commands use the C locale to avoid inherited locale warnings.
+- Regression coverage verifies that archive/checksum download, extraction and smoke-test failures preserve the previous installation.
+- LAN pairing tests wait for complete streamed prompts before checking approval instructions.
+
 ## 0.8.9
 
 Channel mentions respect conflicts between OCS aliases and Claude native names.
