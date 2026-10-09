@@ -73,6 +73,7 @@ interface FakeRouter {
   env: NodeJS.ProcessEnv;
   server: Server;
   startTurnRequests: Array<Record<string, unknown>>;
+  ownerRequests: string[];
   close: () => void;
 }
 
@@ -100,6 +101,7 @@ function fakeRouter(
   mkdirSync(ipcDir, { mode: 0o700 });
   const sockPath = join(ipcDir, "ipc.sock");
   const startTurnRequests: Array<Record<string, unknown>> = [];
+  const ownerRequests: string[] = [];
   const ownerOf = options.ownerOf ?? (() => "renderer-1");
 
   const server = createServer((socket: Socket) => {
@@ -121,6 +123,7 @@ function fakeRouter(
           if (options.delayInitializeMs === undefined) send();
           else setTimeout(send, options.delayInitializeMs);
         } else if (message.method === "thread-owner-discovery") {
+          ownerRequests.push(params.conversationId as string);
           if (options.ignoreOwnerFor?.has(params.conversationId as string)) continue;
           const send = () => reply({ handledByClientId: ownerOf(params.conversationId as string) });
           if (options.scheduleOwnerReply === undefined) send();
@@ -140,7 +143,7 @@ function fakeRouter(
   });
   server.listen(sockPath);
   chmodSync(sockPath, 0o600);
-  return { env: { CODEX_HOME: codexHome }, server, startTurnRequests, close: () => server.close() };
+  return { env: { CODEX_HOME: codexHome }, server, startTurnRequests, ownerRequests, close: () => server.close() };
 }
 
 function fakeCmux(
@@ -328,6 +331,7 @@ echo "Queued message 01a079c9-7318-7192-ae2c-8078515ad91a for thread $3."
       const codex = roster.entries.filter((entry) => entry.kind === "codex-task");
       expect(codex.map((entry) => entry.threadId)).toEqual([THREAD_A]);
       expect(codex[0]!.livePid).toBe(holder.pid);
+      expect(router.ownerRequests).toEqual([THREAD_B]);
     } finally {
       await holder.stop();
       router.close();

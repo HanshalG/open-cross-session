@@ -805,7 +805,8 @@ async function cmdWhoLocal(parsed: Parsed): Promise<void> {
   let codexOwners: Record<string, string> = {};
   if (roster.codexIpc && codexCandidates.length > 0) {
     try {
-      codexOwners = await discoverCodexDesktopOwners(codexCandidates.map((entry) => entry.threadId));
+      const unverified = codexCandidates.filter((entry) => entry.livePid === null);
+      codexOwners = await discoverCodexDesktopOwners(unverified.map((entry) => entry.threadId));
     } catch {
       // Socket/router failure is reported below as no verified open tasks.
     }
