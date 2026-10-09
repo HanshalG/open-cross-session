@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.11
+
+Older open Codex chats remain discoverable when more than 128 newer chats exist.
+
+- Desktop index and rollout fallback discovery retain all eligible candidates rather than dropping older chats before checking reachability.
+- Desktop ownership discovery runs at most 128 requests at once, with a short timeout for each candidate. Closed chats do not prevent later candidates from being checked.
+- Regression checks cover older-chat LAN discovery and the outstanding request limit across 260 candidates. Only live or renderer-owned chats are advertised.
+
 ## 0.8.10
 
 LAN connection failures show the attempted address and handshake failure type, making offline reports easier to diagnose without discarding pairing.
