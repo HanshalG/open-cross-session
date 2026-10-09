@@ -61,6 +61,7 @@ try {
   Write-Host "installed: $Target"
 
   $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+  if ($null -eq $UserPath) { $UserPath = "" }
   if (-not (($UserPath -split ";") -contains $InstallDir)) {
     [Environment]::SetEnvironmentVariable("Path", (($UserPath.TrimEnd(";") + ";" + $InstallDir).TrimStart(";")), "User")
     Write-Host "added $InstallDir to your user PATH (open a new terminal to pick it up)"
