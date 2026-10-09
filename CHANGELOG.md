@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.12
+
+The bundled OCS skill diagnoses LAN failures using authenticated discovery before recommending re-pairing or network changes.
+
+- Troubleshooting distinguishes CLI and daemon versions, directional connectivity, key mismatches and independently controlled trust terms. It explains that ping or an accepting port alone does not verify OCS authentication.
+- Binary builds embed the canonical skill file directly, eliminating a duplicate copy that could drift from the published skill. Compiled-binary installation was verified from an unrelated directory without external skill files.
+
 ## 0.8.11
 
 Older open Codex chats remain discoverable when more than 128 newer chats exist.
