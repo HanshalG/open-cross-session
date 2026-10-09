@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -15,7 +15,7 @@ function executable(path: string, source: string): void {
   chmodSync(path, 0o700);
 }
 
-function fixture(npxExit = 0): {
+function fixture(npxExit = 0, checksumTool: "shasum" | "sha256sum" = "shasum"): {
   root: string;
   env: Record<string, string>;
   npxLog: string;
@@ -45,9 +45,17 @@ case "$out" in
   *) printf '%s\\n' 'archive' > "$out" ;;
 esac
 `);
-  executable(join(bin, "shasum"), `#!/bin/sh
+  executable(join(bin, checksumTool), `#!/bin/sh
 printf '%s\\n' 'deadbeef  archive'
+exit "\${INSTALL_TEST_HASH_EXIT:-0}"
 `);
+  if (checksumTool === "sha256sum") {
+    for (const tool of ["tr", "mktemp", "rm", "awk", "chmod", "mkdir", "mv", "grep"]) {
+      const path = Bun.which(tool);
+      if (path === null) throw new Error(`missing test utility: ${tool}`);
+      symlinkSync(path, join(bin, tool));
+    }
+  }
   executable(join(bin, "tar"), `#!/bin/sh
 dest=""
 while [ "$#" -gt 0 ]; do
@@ -73,7 +81,7 @@ exit "\${INSTALL_TEST_NPX_EXIT:-0}"
     installDir,
     env: {
       ...process.env,
-      PATH: `${bin}:/usr/bin:/bin`,
+      PATH: checksumTool === "sha256sum" ? bin : `${bin}:/usr/bin:/bin`,
       OCS_INSTALL_DIR: installDir,
       OCS_INSTALL_SKILLS: "1",
       OCS_SKILLS_CLI_VERSION: "1.5.23",
@@ -93,6 +101,19 @@ async function run(env: Record<string, string>): Promise<{ code: number; stdout:
 }
 
 describe("curl installer skill setup", () => {
+  test.each(["shasum", "sha256sum"] as const)("a failed %s preserves the existing install even if it prints a matching digest", async (tool) => {
+    const f = fixture(0, tool);
+    mkdirSync(f.installDir, { recursive: true });
+    const previous = "#!/bin/sh\nexit 0\n";
+    executable(join(f.installDir, "ocs"), previous);
+    f.env.INSTALL_TEST_HASH_EXIT = "1";
+    const result = await run(f.env);
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain("cannot verify download");
+    expect(readFileSync(join(f.installDir, "ocs"), "utf8")).toBe(previous);
+    expect(existsSync(f.npxLog)).toBe(false);
+    expect(existsSync(f.binaryLog)).toBe(false);
+  });
   test("downloads this fork's binary and checksum instead of upstream releases", async () => {
     const f = fixture();
     f.env.OCS_INSTALL_SKILLS = "0";

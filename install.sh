@@ -27,13 +27,20 @@ curl -fsSL "$url" -o "$tmp/$asset.tar.gz"
 curl -fsSL "$url.sha256" -o "$tmp/$asset.tar.gz.sha256"
 expected=$(awk '{print $1}' "$tmp/$asset.tar.gz.sha256")
 if command -v shasum >/dev/null 2>&1; then
-  actual=$(LC_ALL=C shasum -a 256 "$tmp/$asset.tar.gz" | awk '{print $1}')
+  if ! digest=$(LC_ALL=C shasum -a 256 "$tmp/$asset.tar.gz"); then
+    echo "shasum failed; cannot verify download" >&2
+    exit 1
+  fi
 elif command -v sha256sum >/dev/null 2>&1; then
-  actual=$(LC_ALL=C sha256sum "$tmp/$asset.tar.gz" | awk '{print $1}')
+  if ! digest=$(LC_ALL=C sha256sum "$tmp/$asset.tar.gz"); then
+    echo "sha256sum failed; cannot verify download" >&2
+    exit 1
+  fi
 else
   echo "neither shasum nor sha256sum found; cannot verify download" >&2
   exit 1
 fi
+actual=$(printf '%s\n' "$digest" | awk '{print $1}')
 if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
   echo "sha256 mismatch: expected $expected got $actual" >&2
   exit 1
