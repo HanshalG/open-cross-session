@@ -50,6 +50,15 @@ Machines on different networks work the same way once they share a virtual LAN (
 
 ## Name your sessions
 
+Codex Desktop chats automatically receive readable OCS names from their sidebar
+titles, such as `audit-pilot-prompts`. Internal review sessions and archived
+chats are excluded when the desktop index is available. Names are persisted,
+and duplicate titles receive a suffix derived from the full thread ID, so chats
+with the same short ID remain separately addressable. An existing `ocs rename`
+name is preserved. Paired computers see the same names through `ocs who --lan`.
+If the desktop index is unavailable or incompatible, OCS falls back to rollout
+discovery. Listing and naming a chat does not prove it is live or wakeable.
+
 Every session already has a fixed short id, such as `claude-7043ea85`,
 `codex-01a06a98`, or `pi-01a09109`; `ocs who` lists them. Add a name that people
 and agents can remember:
@@ -85,6 +94,10 @@ curl -fsSL https://raw.githubusercontent.com/leeguooooo/claude-code-usage-bar/ma
 ```
 
 ## Install
+
+**To install this fork's Codex naming fixes, build from source using
+[these instructions](./docs/fork-build.md).** The release installers below fetch
+upstream binaries and do not include this fork's changes.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/leeguooooo/open-cross-session/main/install.sh | sh

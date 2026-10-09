@@ -55,7 +55,16 @@ ocs dm <address>@<peer> "<text>" # message + wake an agent on a paired machine
   user asks to name or rename this session for ocs, run `ocs rename <name>`. A name taken
   by another session is refused; `--force` takes it over (only when the user says the old
   owner is gone). `ocs whoami --json` prints this session's host, id, name, and addresses.
-- Use the full ID shown by `ocs who --verbose` only if a short prefix is ambiguous.
+- Codex Desktop sidebar titles appear as readable OCS names and labels when its
+  local index is available. Internal review sessions are omitted. Duplicate titles
+  receive distinct aliases tied to the full thread UUID; prefer the listed alias
+  over a short ID when prefixes collide. Existing user-assigned names are preserved.
+- Refresh `ocs who --lan` to find a paired machine's current agents by name or label;
+  do not assume Codex titles are unavailable or reuse an old bare-ID roster.
+  Only live or renderer-open agents are advertised, so an absent chat may be closed,
+  hosted elsewhere, or have handed its work to a differently named Claude session.
+- Use the full ID shown by `ocs who --verbose` only if a short prefix is ambiguous
+  and no unique OCS name is available.
 - `ocs who` lists every reachable Codex task: one whose rollout is held open by a
   live process (wakeable with `codex queue`, terminal TUIs included — shown as
   `[queue pid N · <host app> <tty>]`) or one claimed by an open Desktop renderer

@@ -17,6 +17,7 @@ import {
 } from "./claude-address.ts";
 import { listNativeSessions, type NativeClaudeSession } from "./claude-inject.ts";
 import { codexDesktopIpcAvailable } from "./codex-ipc.ts";
+import { codexRosterName, listCodexRosterSessions } from "./codex-roster.ts";
 import { codexHosts, codexQueueAvailable, codexThreadLivePids, psTable } from "./codex-queue.ts";
 import {
   codexSessionsRoot,
@@ -368,7 +369,7 @@ export function buildRoster(env: NodeJS.ProcessEnv = process.env, hermes: readon
   const selfCodexThreadId = isCodexThreadId(env[CODEX_THREAD_ID_ENV] ?? "")
     ? env[CODEX_THREAD_ID_ENV]!.toLowerCase()
     : null;
-  const codexSessions = listCodexSessions(codexSessionsRoot(env), { limit: 10 });
+  const codexSessions = listCodexRosterSessions(codexSessionsRoot(env));
   // 一次 lsof 批量判活：rollout fd 的持有者证明会话在跑，终端 TUI 和 Desktop 任务通用。
   // 一张进程表喂两处：判活要校验持有者身份，宿主解析要走同一条祖先链。
   const ps = psTable(env);
@@ -378,7 +379,7 @@ export function buildRoster(env: NodeJS.ProcessEnv = process.env, hermes: readon
   for (const s of codexSessions) {
     const livePid = codexLive.get(s.threadId) ?? null;
     const host = livePid === null ? undefined : codexHostByPid.get(livePid);
-    const ocsName = ocsNameFor({ kind: "codex", id: s.threadId }, names)?.name;
+    const ocsName = codexRosterName(s, names, env);
     entries.push({
       kind: "codex-task",
       target: `codex-${s.threadId.slice(0, 8)}`,

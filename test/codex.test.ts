@@ -253,6 +253,7 @@ describe("wakeCodexTask 端到端（假 IPC 路由器）", () => {
           kind: string;
           target?: string;
           threadId?: string;
+          ocsName?: string;
           summary?: string | null;
           cwd?: string | null;
           self?: boolean;
@@ -266,6 +267,7 @@ describe("wakeCodexTask 端到端（假 IPC 路由器）", () => {
         kind: "codex-task",
         target: "codex-bbbbbbbb",
         threadId: THREAD_B,
+        ocsName: "hello-world",
         summary: "hello world",
         cwd: "/tmp/b",
         self: true,
