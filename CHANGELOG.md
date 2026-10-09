@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.13
+
+Codex roster discovery avoids redundant ownership probes and repeated alias claims.
+
+- Local discovery skips desktop ownership requests for chats already verified by a live rollout holder, matching the LAN discovery path. Those chats remain listed, and delivery routing is unchanged.
+- Generated aliases are added to the current roster name snapshot. Later chats skip known occupied title aliases while atomic claims remain the authority for concurrent changes. Full UUID routing and persisted aliases are preserved.
+- The skill clarifies queue and cmux fallback behavior for terminal and desktop Codex chats.
+
 ## 0.8.12
 
 The bundled OCS skill diagnoses LAN failures using authenticated discovery before recommending re-pairing or network changes.
