@@ -14,14 +14,14 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-export const OCS_REPO = "leeguooooo/open-cross-session";
+export const OCS_REPO = "HanshalG/open-cross-session";
 export const OCS_INSTALL_SCRIPT_URL = `https://raw.githubusercontent.com/${OCS_REPO}/main/install.sh`;
 export const OCS_INSTALL_PS1_URL = `https://raw.githubusercontent.com/${OCS_REPO}/main/install.ps1`;
 export const OCS_LATEST_RELEASE_URL = `https://api.github.com/repos/${OCS_REPO}/releases/latest`;
 
 /** 覆盖最新 release 的查询地址（测试指向本地假服务器）。 */
 export const OCS_UPGRADE_LATEST_URL_ENV = "OCS_UPGRADE_LATEST_URL";
-/** 覆盖 installer：给一个本地脚本路径，用 `sh <path>` 跑，替代 `curl … | sh`。 */
+/** 覆盖 installer：给一个本地脚本路径，用 `sh <path>` 跑，替代默认下载安装。 */
 export const OCS_UPGRADE_INSTALLER_ENV = "OCS_UPGRADE_INSTALLER";
 /** 设为 "0" 时 doctor 跳过版本检查（离线、CI、测试）。 */
 export const OCS_UPGRADE_CHECK_ENV = "OCS_UPGRADE_CHECK";
@@ -102,18 +102,23 @@ export function upgradeCheckEnabled(env: NodeJS.ProcessEnv = process.env): boole
 }
 
 /**
- * 跑 installer。默认 `curl -fsSL <install.sh> | sh`；OCS_UPGRADE_INSTALLER 指向本地脚本时
+ * 跑 installer。默认下载到临时文件后执行；OCS_UPGRADE_INSTALLER 指向本地脚本时
  * 改跑 `sh <path>`（测试用）。stdio 直通终端，用户能看到下载/校验/替换的每一步。
  * 返回 installer 的退出码；起不来返回 null。
  */
 export function runInstaller(env: NodeJS.ProcessEnv = process.env): { code: number | null; command: string } {
   const local = env[OCS_UPGRADE_INSTALLER_ENV];
+  const unixInstaller = `set -e
+installer=$(mktemp)
+trap 'rm -f "$installer"' EXIT
+curl -fsSL ${OCS_INSTALL_SCRIPT_URL} -o "$installer"
+sh "$installer"`;
   // Windows 没有 sh/curl 管道：走 install.ps1（同样 sha256 校验、冒烟、改名替换）。
   const argv = typeof local === "string" && local !== ""
     ? ["sh", local]
     : process.platform === "win32"
-      ? ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `irm ${OCS_INSTALL_PS1_URL} | iex`]
-      : ["sh", "-c", `curl -fsSL ${OCS_INSTALL_SCRIPT_URL} | sh`];
+      ? ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `$ErrorActionPreference = 'Stop'; irm ${OCS_INSTALL_PS1_URL} | iex`]
+      : ["sh", "-c", unixInstaller];
   const proc = spawnSync(argv[0]!, argv.slice(1), { stdio: "inherit", env });
   return { code: proc.status, command: argv.join(" ") };
 }
@@ -205,7 +210,8 @@ export function updateNoticeDisabled(env: NodeJS.ProcessEnv, command: string | u
 
 function readUpdateCache(env: NodeJS.ProcessEnv): { checked_at: number; latest: string | null } | null {
   try {
-    const raw = JSON.parse(readFileSync(updateCachePath(env), "utf8")) as { checked_at?: unknown; latest?: unknown };
+    const raw = JSON.parse(readFileSync(updateCachePath(env), "utf8")) as { checked_at?: unknown; latest?: unknown; repository?: unknown };
+    if (raw.repository !== OCS_REPO) return null;
     if (typeof raw.checked_at !== "number") return null;
     return { checked_at: raw.checked_at, latest: typeof raw.latest === "string" ? raw.latest : null };
   } catch {
@@ -249,7 +255,7 @@ export function maybeUpdateNotice(
 function writeUpdateCache(env: NodeJS.ProcessEnv, now: number, latest: string | null): void {
   const path = updateCachePath(env);
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify({ checked_at: Math.floor(now / 1000), latest })}\n`);
+  writeFileSync(path, `${JSON.stringify({ checked_at: Math.floor(now / 1000), latest, repository: OCS_REPO })}\n`);
 }
 
 /** `ocs _update-check`：2 秒超时查一次，成败都写 checked_at（离线机器不被每次调用重试）。 */

@@ -19,6 +19,7 @@ function fixture(npxExit = 0): {
   root: string;
   env: Record<string, string>;
   npxLog: string;
+  downloadLog: string;
   binaryLog: string;
   installDir: string;
 } {
@@ -27,12 +28,14 @@ function fixture(npxExit = 0): {
   const bin = join(root, "bin");
   const installDir = join(root, "install");
   const npxLog = join(root, "npx.log");
+  const downloadLog = join(root, "download.log");
   const binaryLog = join(root, "binary.log");
   mkdirSync(bin, { recursive: true });
   executable(join(bin, "uname"), `#!/bin/sh
 if [ "\${1:-}" = "-s" ]; then echo Darwin; else echo arm64; fi
 `);
   executable(join(bin, "curl"), `#!/bin/sh
+printf '%s\\n' "$*" >> "$INSTALL_TEST_DOWNLOAD_LOG"
 out=""
 while [ "$#" -gt 0 ]; do
   if [ "$1" = "-o" ]; then out="$2"; shift 2; else shift; fi
@@ -65,6 +68,7 @@ exit "\${INSTALL_TEST_NPX_EXIT:-0}"
   return {
     root,
     npxLog,
+    downloadLog,
     binaryLog,
     installDir,
     env: {
@@ -74,6 +78,7 @@ exit "\${INSTALL_TEST_NPX_EXIT:-0}"
       OCS_INSTALL_SKILLS: "1",
       OCS_SKILLS_CLI_VERSION: "1.5.23",
       INSTALL_TEST_NPX_LOG: npxLog,
+      INSTALL_TEST_DOWNLOAD_LOG: downloadLog,
       INSTALL_TEST_BINARY_LOG: binaryLog,
       INSTALL_TEST_NPX_EXIT: String(npxExit),
     } as Record<string, string>,
@@ -88,6 +93,16 @@ async function run(env: Record<string, string>): Promise<{ code: number; stdout:
 }
 
 describe("curl installer skill setup", () => {
+  test("downloads this fork's binary and checksum instead of upstream releases", async () => {
+    const f = fixture();
+    f.env.OCS_INSTALL_SKILLS = "0";
+    const result = await run(f.env);
+    expect(result.code).toBe(0);
+    const requests = readFileSync(f.downloadLog, "utf8");
+    expect(requests).toContain("https://github.com/HanshalG/open-cross-session/releases/latest/download/ocs-darwin-arm64.tar.gz");
+    expect(requests).toContain("ocs-darwin-arm64.tar.gz.sha256");
+    expect(requests).not.toContain("leeguooooo");
+  });
   test("pins skills add to the downloaded ocs version and targets Claude, Codex, and Pi", async () => {
     const f = fixture();
     const result = await run(f.env);
@@ -95,7 +110,7 @@ describe("curl installer skill setup", () => {
     expect(result.stderr).toBe("");
     expect(existsSync(join(f.installDir, "ocs"))).toBe(true);
     expect(readFileSync(f.npxLog, "utf8").trim()).toBe(
-      "-y skills@1.5.23 add https://github.com/leeguooooo/open-cross-session/tree/v0.4.2/skills/ocs " +
+      "-y skills@1.5.23 add https://github.com/HanshalG/open-cross-session/tree/v0.4.2/skills/ocs " +
         "--skill ocs --global --agent claude-code --agent codex --agent pi --yes",
     );
     expect(readFileSync(f.binaryLog, "utf8").trim()).toBe("skill install");

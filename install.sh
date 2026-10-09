@@ -1,9 +1,9 @@
 #!/bin/sh
 # open-cross-session installer — GitHub Release 二进制，零 token。
-#   curl -fsSL https://raw.githubusercontent.com/leeguooooo/open-cross-session/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/HanshalG/open-cross-session/main/install.sh | sh
 set -eu
 
-REPO="leeguooooo/open-cross-session"
+REPO="HanshalG/open-cross-session"
 INSTALL_DIR="${OCS_INSTALL_DIR:-$HOME/.local/bin}"
 SKILLS_CLI_VERSION="${OCS_SKILLS_CLI_VERSION:-1.5.23}"
 

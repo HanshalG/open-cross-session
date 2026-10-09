@@ -2,8 +2,8 @@
 
 **Claude Code, Codex, Pi, and terminal agents message and wake each other — on one machine, and across the computers on your LAN (macOS, Linux, Windows). No server, no account.**
 
-[![ci](https://github.com/leeguooooo/open-cross-session/actions/workflows/ci.yml/badge.svg)](https://github.com/leeguooooo/open-cross-session/actions/workflows/ci.yml)
-[![release](https://img.shields.io/github/v/release/leeguooooo/open-cross-session)](https://github.com/leeguooooo/open-cross-session/releases)
+[![ci](https://github.com/HanshalG/open-cross-session/actions/workflows/ci.yml/badge.svg)](https://github.com/HanshalG/open-cross-session/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/HanshalG/open-cross-session)](https://github.com/HanshalG/open-cross-session/releases)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
 [中文文档](./README.zh-CN.md)
@@ -95,18 +95,20 @@ curl -fsSL https://raw.githubusercontent.com/leeguooooo/claude-code-usage-bar/ma
 
 ## Install
 
-**To install this fork's Codex naming fixes, build from source using
-[these instructions](./docs/fork-build.md).** The release installers below fetch
-upstream binaries and do not include this fork's changes.
+This is [HanshalG's fork](https://github.com/HanshalG/open-cross-session) of
+[open-cross-session](https://github.com/leeguooooo/open-cross-session), with
+readable Codex names, persistent pairing, and improved desktop discovery.
+The installers and `ocs upgrade` below use this fork. For a source build, follow
+[these instructions](./docs/fork-build.md).
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/leeguooooo/open-cross-session/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/HanshalG/open-cross-session/main/install.sh | sh
 ```
 
 Windows (PowerShell):
 
 ```powershell
-irm https://raw.githubusercontent.com/leeguooooo/open-cross-session/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/HanshalG/open-cross-session/main/install.ps1 | iex
 ```
 
 Single static binary, zero runtime dependencies. macOS (arm64/x64), Linux (x64), and Windows (x64).
@@ -116,7 +118,7 @@ telemetry disabled, then runs the binary's embedded fallback and Pi-extension
 setup. To install only the binary:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/leeguooooo/open-cross-session/main/install.sh | OCS_INSTALL_SKILLS=0 sh
+curl -fsSL https://raw.githubusercontent.com/HanshalG/open-cross-session/main/install.sh | OCS_INSTALL_SKILLS=0 sh
 ```
 
 From source: `bun install && bun link && ocs skill install`.
@@ -243,7 +245,7 @@ that it just printed a migration blurb and exited, so an older install can never
 newer release on its own and will keep looking current. Re-run the installer once:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/leeguooooo/open-cross-session/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/HanshalG/open-cross-session/main/install.sh | sh
 ```
 
 After that `ocs upgrade` works, and `ocs doctor` warns when the binary falls behind.
@@ -396,7 +398,7 @@ Yes, on the same LAN. Run `ocs lan up` on both machines, pair them once with `oc
 
 ### Does it work on Windows?
 
-Yes. `ocs` ships a Windows x64 binary (`irm https://raw.githubusercontent.com/leeguooooo/open-cross-session/main/install.ps1 | iex`), wakes Claude Code through its named-pipe inbox and ChatGPT Desktop's Codex through its local IPC pipe, and joins the LAN mode.
+Yes. `ocs` ships a Windows x64 binary (`irm https://raw.githubusercontent.com/HanshalG/open-cross-session/main/install.ps1 | iex`), wakes Claude Code through its named-pipe inbox and ChatGPT Desktop's Codex through its local IPC pipe, and joins the LAN mode.
 
 The Codex pipe name (`\\.\pipe\codex-ipc`) is fixed and any local process could create it first, so since 0.7.1 ocs checks who is serving the pipe on the very connection it is about to use: the pipe must be owned by your user, and its server process must run as you and be ChatGPT Desktop (Store package `OpenAI.Codex`, image inside the package's install directory). Otherwise nothing is sent, the message stays in the inbox, and `ocs doctor` prints the reason. A Desktop that is not the Store package, or that runs elevated, is refused too.
 

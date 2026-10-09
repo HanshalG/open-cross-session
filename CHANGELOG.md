@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.1
+
+Readable desktop agents, persistent LAN pairing, and upgrades from this fork.
+
+- Codex Desktop chats use sidebar titles and persistent OCS names, with distinct aliases when titles or short IDs collide. Internal review sessions and archived chats are excluded when the desktop index is available.
+- Pairing persists until explicitly unpaired. `--for` and `--once` still enforce requested limits. Existing timed peers require `ocs lan trust <peer> --forever` on each computer to remove their expiry.
+- Discovery checks all rollout holders, so an indexer cannot hide a valid Codex process. Portable terminal fixtures let the full suite run from Codex Desktop.
+- Installers, pairing instructions, and `ocs upgrade` use `HanshalG/open-cross-session`, preserving this fork's changes.
+- Failed installer downloads report upgrade failure. Update caches are tied to their repository, so an upstream cache cannot suggest a fork upgrade.
+
 ## 0.8.0
 
 **Pairing two people is copy, paste, compare six digits — and trust now runs out.**

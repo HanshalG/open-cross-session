@@ -2,8 +2,8 @@
 
 **Claude Code、Codex、Pi 和终端里的 agent 互相唤醒、互发消息——同一台机器上可以，局域网里的几台电脑之间也可以（macOS、Linux、Windows）。不要服务器，不要账号。**
 
-[![ci](https://github.com/leeguooooo/open-cross-session/actions/workflows/ci.yml/badge.svg)](https://github.com/leeguooooo/open-cross-session/actions/workflows/ci.yml)
-[![release](https://img.shields.io/github/v/release/leeguooooo/open-cross-session)](https://github.com/leeguooooo/open-cross-session/releases)
+[![ci](https://github.com/HanshalG/open-cross-session/actions/workflows/ci.yml/badge.svg)](https://github.com/HanshalG/open-cross-session/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/HanshalG/open-cross-session)](https://github.com/HanshalG/open-cross-session/releases)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
 [English](./README.md)
@@ -79,14 +79,18 @@ curl -fsSL https://raw.githubusercontent.com/leeguooooo/claude-code-usage-bar/ma
 
 ## 安装
 
+这是 [HanshalG 的 fork](https://github.com/HanshalG/open-cross-session)，基于
+[open-cross-session](https://github.com/leeguooooo/open-cross-session)。安装器和 `ocs upgrade`
+使用此 fork，包含可读的 Codex 名称、永久配对和改进的桌面会话发现。
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/leeguooooo/open-cross-session/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/HanshalG/open-cross-session/main/install.sh | sh
 ```
 
 Windows（PowerShell）：
 
 ```powershell
-irm https://raw.githubusercontent.com/leeguooooo/open-cross-session/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/HanshalG/open-cross-session/main/install.ps1 | iex
 ```
 
 单文件静态二进制，运行时零依赖。支持 macOS（arm64/x64）、Linux（x64）和 Windows（x64）。安装器会给
@@ -94,7 +98,7 @@ Claude Code、Codex、Pi 注册与二进制同版本的 ocs skill：有 `npx` �
 `skills` CLI，并关闭 telemetry；随后运行二进制内置安装，补上 Pi 直投扩展。只装二进制：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/leeguooooo/open-cross-session/main/install.sh | OCS_INSTALL_SKILLS=0 sh
+curl -fsSL https://raw.githubusercontent.com/HanshalG/open-cross-session/main/install.sh | OCS_INSTALL_SKILLS=0 sh
 ```
 
 源码方式：`bun install && bun link && ocs skill install`。
@@ -323,7 +327,7 @@ Claude Code 自带的 cross-session 已经能让 Claude 和 Claude 互发消息�
 
 ### 支持 Windows 吗？
 
-支持。有 Windows x64 二进制（`irm https://raw.githubusercontent.com/leeguooooo/open-cross-session/main/install.ps1 | iex`），通过命名管道收件箱唤醒 Claude Code，通过本地 IPC 管道唤醒 ChatGPT Desktop 里的 Codex，也能加入局域网模式。
+支持。有 Windows x64 二进制（`irm https://raw.githubusercontent.com/HanshalG/open-cross-session/main/install.ps1 | iex`），通过命名管道收件箱唤醒 Claude Code，通过本地 IPC 管道唤醒 ChatGPT Desktop 里的 Codex，也能加入局域网模式。
 
 Codex 的管道名（`\\.\pipe\codex-ipc`）是固定的，本机任何进程都可以抢先建出来。0.7.1 起 ocs 在即将使用的那条连接上核对管道的服务端：管道属主必须是你，服务端进程必须以你的身份运行，并且是 ChatGPT Desktop（Store 包 `OpenAI.Codex`，映像在包的安装目录里）。不满足就什么都不发，消息留在收件箱，`ocs doctor` 会写出原因。不是 Store 包的 Desktop、以管理员身份运行的 Desktop 也会被拒。
 

@@ -1,10 +1,10 @@
 # open-cross-session installer for Windows - GitHub Release binary, no token.
-#   irm https://raw.githubusercontent.com/leeguooooo/open-cross-session/main/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/HanshalG/open-cross-session/main/install.ps1 | iex
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$Repo = "leeguooooo/open-cross-session"
+$Repo = "HanshalG/open-cross-session"
 $InstallDir = if ($env:OCS_INSTALL_DIR) { $env:OCS_INSTALL_DIR } else { Join-Path $HOME ".local\bin" }
 $Asset = "ocs-windows-x64"
 # ARM64 Windows runs the x64 build under emulation.

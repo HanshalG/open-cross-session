@@ -434,7 +434,7 @@ Remove the local Agent Party install: https://github.com/leeguooooo/agentparty/b
 Machines on the same LAN: \`ocs lan up\` + \`ocs lan pair\`, then address agents as <name>@<peer>.
 Machines on different networks: put both on the same virtual LAN (Tailscale, WireGuard,
 ZeroTier or a company VPN) and pair with \`ocs lan pair <code> --addr <peer-vpn-ip>:47890\`.
-Details: https://github.com/leeguooooo/open-cross-session/blob/main/docs/lan.md`,
+Details: https://github.com/HanshalG/open-cross-session/blob/main/docs/lan.md`,
   upgradeChecking: "checking the latest GitHub Release…",
   upgradeCurrent: (version) => `ocs ${version} is already the latest release`,
   upgradeBehind: (current, latest) => `ocs ${current} is behind the latest release ${latest}`,
@@ -747,7 +747,7 @@ ${lanMessages("zh").help}
 同一局域网的机器：\`ocs lan up\` + \`ocs lan pair\`，之后用 <名字>@<对端> 找对方的 agent。
 不同网络的机器：接入同一个虚拟局域网（Tailscale、WireGuard、ZeroTier 或公司 VPN），
 用 \`ocs lan pair <配对码> --addr <对方VPN地址>:47890\` 配对。
-详见 https://github.com/leeguooooo/open-cross-session/blob/main/docs/lan.md`,
+详见 https://github.com/HanshalG/open-cross-session/blob/main/docs/lan.md`,
   upgradeChecking: "正在查询 GitHub 最新 Release…",
   upgradeCurrent: (version) => `ocs ${version} 已是最新版本`,
   upgradeBehind: (current, latest) => `ocs ${current} 落后于最新版本 ${latest}`,

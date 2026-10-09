@@ -43,6 +43,6 @@ Names are assigned during roster discovery and keep resolving to the full
 thread UUID even when short IDs collide. Existing user-assigned names stay in
 place; use `ocs rename <name>` inside a chat to choose a different name.
 
-The upstream `ocs upgrade` and release installers fetch upstream binaries,
-which can replace these changes. To update this fork, pull its source and
+This fork's `ocs upgrade` and release installers fetch releases from
+`HanshalG/open-cross-session`. To update a source checkout, pull its source and
 repeat the build and installation steps.

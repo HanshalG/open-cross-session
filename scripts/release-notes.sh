@@ -20,10 +20,10 @@ cat <<'NOTES'
 **Install / upgrade**
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/leeguooooo/open-cross-session/main/install.sh | sh   # macOS / Linux
-irm https://raw.githubusercontent.com/leeguooooo/open-cross-session/main/install.ps1 | iex       # Windows (PowerShell)
+curl -fsSL https://raw.githubusercontent.com/HanshalG/open-cross-session/main/install.sh | sh   # macOS / Linux
+irm https://raw.githubusercontent.com/HanshalG/open-cross-session/main/install.ps1 | iex       # Windows (PowerShell)
 ocs upgrade                                                                                        # already installed
 ```
 
-macOS binaries are Developer ID signed and notarized. Agents across your LAN: [docs/lan.md](https://github.com/leeguooooo/open-cross-session/blob/main/docs/lan.md).
+macOS binaries in this fork are ad-hoc signed, without Developer ID signing or notarization. Agents across your LAN: [docs/lan.md](https://github.com/HanshalG/open-cross-session/blob/main/docs/lan.md).
 NOTES

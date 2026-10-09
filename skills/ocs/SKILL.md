@@ -13,9 +13,9 @@ addressed as `<address>@<peer>` (`ocs who --lan` lists them).
 
 If `ocs` is not on PATH, install the GitHub Release binary (no token needed):
 
-    curl -fsSL https://raw.githubusercontent.com/leeguooooo/open-cross-session/main/install.sh | sh
+    curl -fsSL https://raw.githubusercontent.com/HanshalG/open-cross-session/main/install.sh | sh
 
-Windows (PowerShell): `irm https://raw.githubusercontent.com/leeguooooo/open-cross-session/main/install.ps1 | iex`
+Windows (PowerShell): `irm https://raw.githubusercontent.com/HanshalG/open-cross-session/main/install.ps1 | iex`
 
 ## Upgrade
 

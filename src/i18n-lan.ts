@@ -3,8 +3,8 @@
 
 import type { Lang } from "./i18n.ts";
 
-const INSTALL_SH = "curl -fsSL https://raw.githubusercontent.com/leeguooooo/open-cross-session/main/install.sh | sh";
-const INSTALL_PS = "irm https://raw.githubusercontent.com/leeguooooo/open-cross-session/main/install.ps1 | iex";
+const INSTALL_SH = "curl -fsSL https://raw.githubusercontent.com/HanshalG/open-cross-session/main/install.sh | sh";
+const INSTALL_PS = "irm https://raw.githubusercontent.com/HanshalG/open-cross-session/main/install.ps1 | iex";
 
 export interface LanCatalog {
   help: string;

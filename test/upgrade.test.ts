@@ -9,6 +9,7 @@ import {
   OCS_UPGRADE_INSTALLER_ENV,
   OCS_UPGRADE_LATEST_URL_ENV,
   parseVersion,
+  OCS_REPO,
 } from "../src/upgrade.ts";
 import { autoCleanupTempDirs, tempDir } from "./tmp";
 
@@ -109,6 +110,18 @@ describe("checkUpgrade（本地假 GitHub）", () => {
 });
 
 describe("ocs upgrade（端到端，假 GitHub + 假 installer）", () => {
+  test("failed installer download reports failure instead of a successful upgrade", async () => {
+    const gh = fakeGithub({ tag: `v${bump(OCS_VERSION, 1)}` });
+    const bin = tempDir("ocs-upgrade-curl-failure-");
+    writeFileSync(join(bin, "curl"), "#!/bin/sh\nexit 22\n", { mode: 0o755 });
+    const r = await runCli(["upgrade"], {
+      [OCS_UPGRADE_LATEST_URL_ENV]: gh.url,
+      PATH: `${bin}:/usr/bin:/bin`,
+    });
+    expect(r.code).not.toBe(0);
+    expect(r.stderr).toContain("22");
+    expect(r.stdout).not.toContain("ocs upgraded");
+  }, T);
   test("落后时跑 installer，成功退出码 0，并附跨机器提示", async () => {
     const gh = fakeGithub({ tag: `v${bump(OCS_VERSION, 1)}` });
     const inst = fakeInstaller(0);
@@ -228,7 +241,7 @@ describe("每日新版本提示（use-family 升级约定 §2）", () => {
     if (entry !== null) {
       const { mkdirSync } = require("node:fs") as typeof import("node:fs");
       mkdirSync(join(cache, "ocs"), { recursive: true });
-      writeFileSync(join(cache, "ocs", "update-check.json"), JSON.stringify(entry));
+      writeFileSync(join(cache, "ocs", "update-check.json"), JSON.stringify({ ...entry, repository: OCS_REPO }));
     }
     // 显式打开检查（preload 里默认关着），CI 变量也清掉
     return { XDG_CACHE_HOME: cache, OCS_NO_UPDATE_CHECK: "", USE_NO_UPDATE_CHECK: "", CI: "" };
@@ -243,6 +256,27 @@ describe("每日新版本提示（use-family 升级约定 §2）", () => {
     for (const disabled of [{ CI: "true" }, { OCS_NO_UPDATE_CHECK: "1" }, { USE_NO_UPDATE_CHECK: "1" }]) {
       expect((await runCli(["read", "c", "--as", "t", "--peek"], { ...env, ...disabled })).stderr).toBe("");
     }
+  }, T);
+
+  test("a cached upstream release cannot produce a fork upgrade notice", async () => {
+    const gh = fakeGithub({ tag: `v${OCS_VERSION}` });
+    const env = { ...cacheEnv({ checked_at: Math.floor(Date.now() / 1000), latest: "99.0.0" }), [OCS_UPGRADE_LATEST_URL_ENV]: gh.url };
+    const path = join(env.XDG_CACHE_HOME, "ocs", "update-check.json");
+    const entry = JSON.parse(await Bun.file(path).text());
+    entry.repository = "leeguooooo/open-cross-session";
+    writeFileSync(path, JSON.stringify(entry));
+    const r = await runCli(["read", "c", "--as", "t", "--peek"], env);
+    expect(r.stderr).toBe("");
+    expect(r.stdout).not.toContain("99.0.0");
+    const deadline = Date.now() + 8000;
+    let cached: { repository: string; latest: string | null } = entry;
+    while (Date.now() < deadline) {
+      cached = JSON.parse(await Bun.file(path).text());
+      if (cached.repository === OCS_REPO && cached.latest === OCS_VERSION) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    expect(cached).toMatchObject({ repository: OCS_REPO, latest: OCS_VERSION });
+    expect(gh.hits()).toBe(1);
   }, T);
 
   test("缓存过期：前台不等，后台 _update-check 查一次写回缓存（失败也写 checked_at）", async () => {
