@@ -165,11 +165,13 @@ describe("ocs lan 端到端（两台机器）", () => {
         }
       };
       const joinLine = (await readUntil(/ocs lan join ([a-z2-7]{20})( --addr \S+)?/))[1]!;
+      await readUntil(/copy to here/);
       expect(issued).toContain("copy from here");
       expect(issued).toContain("Trust: permanent");
       const joiner = Bun.spawn([process.execPath, CLI, "lan", "join", joinLine], { env: b.env, stdout: "pipe", stderr: "pipe" });
       const sas = (await readUntil(/check code: (\d{3}) (\d{3})/)).slice(1, 3).join("");
-      expect(issued).toContain(`ocs lan approve ${sas}`);
+      const approvalCode = (await readUntil(/ocs lan approve (\d{6})/))[1]!;
+      expect(approvalCode).toBe(sas);
       // A wrong code approves nothing
       const wrong = await run(a, ["lan", "approve", sas === "000000" ? "111111" : "000000"]);
       expect(wrong.code).toBe(1);
