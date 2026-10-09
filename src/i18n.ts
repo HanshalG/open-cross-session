@@ -216,7 +216,7 @@ const en: Catalog = {
   help: `ocs — AI agents message and wake each other: on one machine, and across paired computers on your LAN. No server.
 
 Usage:
-  ocs who [--verbose | --json]
+  ocs who [--verbose | --json] [--lan]
       Roster of every reachable agent: Claude sessions, Codex tasks, Pi sessions, terminals,
       plus pending idle notifications. Same-project peers come first; --verbose shows raw IDs/paths.
   ocs dm <name-or-id> <text> [--as <name>] [--inherit <old-dm-channel>] [--notify-when-idle]
@@ -544,7 +544,7 @@ const zh: Catalog = {
   help: `ocs — AI agent 互相唤醒、互发消息：同一台机器上，以及局域网里配对过的电脑之间。零服务器
 
 用法:
-  ocs who [--verbose | --json]
+  ocs who [--verbose | --json] [--lan]
       全机 agent 花名册：Claude 会话、Codex 任务、Pi 会话、终端，都在一张表里，
       外加待触发的空闲通知；当前项目优先，--verbose 显示底层 ID/路径
   ocs dm <名字或id> <内容> [--as <name>] [--inherit <旧dm频道>] [--notify-when-idle]

@@ -45,6 +45,7 @@ ocs dm <name> "<text>" --notify-when-idle      # send, then subscribe (also on s
 ocs rename <name> [--force] | --clear   # give THIS session a memorable address
 ocs whoami [--json] | sessions | watch <channel> | doctor [--fix] | version
 ocs who --lan                    # agents on paired machines in the same LAN
+ocs who --lan --json             # local roster plus structured peers in the lan array
 ocs dm <address>@<peer> "<text>" # message + wake an agent on a paired machine
 ```
 
@@ -59,6 +60,10 @@ ocs dm <address>@<peer> "<text>" # message + wake an agent on a paired machine
   local index is available. Internal review sessions are omitted. Duplicate titles
   receive distinct aliases tied to the full thread UUID; prefer the listed alias
   over a short ID when prefixes collide. Existing user-assigned names are preserved.
+- For structured LAN discovery, use `ocs who --lan --json`: local agents stay in
+  `entries`, while `lan` lists each peer with its name, connection status, and remote
+  agents whose addresses already include `@peer`. `ocs lan who [peer] --json` returns
+  only that peer array. Offline peers and key mismatches have empty entries and an error.
 - Refresh `ocs who --lan` to find a paired machine's current agents by name or label;
   do not assume Codex titles are unavailable or reuse an old bare-ID roster.
   Only live or renderer-open agents are advertised, so an absent chat may be closed,

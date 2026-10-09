@@ -111,6 +111,10 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/HanshalG/open-cross-session/main/install.ps1 | iex
 ```
 
+The current fork release provides a tested macOS Apple Silicon binary. Intel Mac,
+Linux, and Windows release assets are pending the GitHub Actions build. Those
+platforms can build from source.
+
 Single static binary, zero runtime dependencies. macOS (arm64/x64), Linux (x64), and Windows (x64).
 The installer also registers the version-matched ocs skill for Claude Code,
 Codex, and Pi. It uses the pinned `skills` CLI when `npx` is available, with
@@ -318,6 +322,12 @@ ocs who --lan               # agents on A: claude-1a2b3c4d@mini  claude  idle  â
 ocs dm claude-1a2b3c4d@mini "can you look at the CI failure?"
 ```
 
+For agent tools and scripts, `ocs who --lan --json` keeps local agents in `entries`
+and adds a `lan` array. Each peer has `peer`, `name`, `status`, and `entries` with
+ready-to-use `address@peer` addresses. A peer whose connection fails has empty
+entries and an `error`; `status` distinguishes `offline` from `key-mismatch`.
+`ocs lan who [peer] --json` returns only the peer array.
+
 Pairing stays trusted until you run `ocs lan unpair <peer>`. Use `--for 30m|2h|7d`
 for a timed pairing or `--once` for a single message. Both sides get the same terms;
 explicitly timed or single-use peers are refused when their limits are reached.
@@ -398,7 +408,7 @@ Yes, on the same LAN. Run `ocs lan up` on both machines, pair them once with `oc
 
 ### Does it work on Windows?
 
-Yes. `ocs` ships a Windows x64 binary (`irm https://raw.githubusercontent.com/HanshalG/open-cross-session/main/install.ps1 | iex`), wakes Claude Code through its named-pipe inbox and ChatGPT Desktop's Codex through its local IPC pipe, and joins the LAN mode.
+OCS supports Windows x64; this fork's downloadable Windows build is pending GitHub Actions. On Windows, OCS wakes Claude Code through its named-pipe inbox and Codex Desktop through its local IPC pipe, and joins the LAN mode.
 
 The Codex pipe name (`\\.\pipe\codex-ipc`) is fixed and any local process could create it first, so since 0.7.1 ocs checks who is serving the pipe on the very connection it is about to use: the pipe must be owned by your user, and its server process must run as you and be ChatGPT Desktop (Store package `OpenAI.Codex`, image inside the package's install directory). Otherwise nothing is sent, the message stays in the inbox, and `ocs doctor` prints the reason. A Desktop that is not the Store package, or that runs elevated, is refused too.
 

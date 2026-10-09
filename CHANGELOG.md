@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.2
+
+Structured LAN discovery for agent tools.
+
+- `ocs who --lan --json` includes paired machines and their remote agents in a `lan` array, alongside the existing local roster.
+- `ocs lan who [peer] --json` returns the same peer records directly. Each remote address includes its peer suffix, and offline or key-mismatched peers are reported with their connection status and error.
+- CLI integration tests isolate their session stores from the machine running them and cover named agents, labels, empty peer lists, online peers, offline peers, and pinned-key mismatches over real paired connections.
+- Installation documentation identifies which platform binaries are currently available in the fork.
+
 ## 0.8.1
 
 Readable desktop agents, persistent LAN pairing, and upgrades from this fork.

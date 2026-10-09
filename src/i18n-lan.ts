@@ -107,7 +107,8 @@ const en: LanCatalog = {
   ocs lan trust <peer> --once | --for <d> | --forever   change how long this machine trusts a peer
   ocs lan pair --code … / ocs lan pair <code>   older one-time-code pairing (works with ocs 0.6/0.7)
   ocs lan status | peers | scan | who [<peer>] | unpair <peer> | down | autostart on|off
-      Then: ocs dm <address>@<peer> <text>; ocs who --lan lists remote agents.`,
+      Then: ocs dm <address>@<peer> <text>; ocs who --lan lists remote agents.
+      Add --json to who or lan who for structured peer and agent records.`,
   usage: "usage: ocs lan up|down|status|pair [<code>]|join <key>|approve <code>|reject|trust <peer>|peers|scan|who [<peer>]|unpair <peer>|autostart on|off",
   upStarted: (name, port, fp, discover) =>
     `lan: daemon up as ${name} on port ${port} (key ${fp})${discover ? "" : " — discovery off"}`,
@@ -238,7 +239,8 @@ const zh: LanCatalog = {
   ocs lan trust <对端> --once | --for <时长> | --forever   改本机对某个对端的信任期限
   ocs lan pair --code … / ocs lan pair <配对码>  旧的一次性配对码方式（兼容 ocs 0.6/0.7）
   ocs lan status | peers | scan | who [<对端>] | unpair <对端> | down | autostart on|off
-      之后：ocs dm <地址>@<对端> <内容>；ocs who --lan 列出远端 agent`,
+      之后：ocs dm <地址>@<对端> <内容>；ocs who --lan 列出远端 agent
+      给 who 或 lan who 加 --json，返回结构化的对端和 agent 记录。`,
   usage: "用法: ocs lan up|down|status|pair [<配对码>]|join <公钥>|approve <核对码>|reject|trust <对端>|peers|scan|who [<对端>]|unpair <对端>|autostart on|off",
   upStarted: (name, port, fp, discover) =>
     `lan: 守护进程已启动，实例名 ${name}，端口 ${port}（公钥 ${fp}）${discover ? "" : "，局域网发现已关闭"}`,

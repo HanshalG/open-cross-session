@@ -545,39 +545,62 @@ function lanUnpair(ctx: LanCliContext, query: string): void {
   console.log(lanMessages(ctx.lang).unpaired(peer.label));
 }
 
-/** `ocs lan who [peer]` 和 `ocs who --lan` 共用：并发查每个对端，离线的单独一行。 */
-export async function printLanWho(ctx: Pick<LanCliContext, "lang" | "fail">, only?: LanPeer): Promise<void> {
-  const L = lanMessages(ctx.lang);
+export interface LanWhoPeer {
+  peer: string;
+  name: string;
+  status: "online" | "offline" | "key-mismatch";
+  entries: Awaited<ReturnType<typeof remoteWho>>["entries"];
+  error?: string;
+}
+
+export async function listLanWho(ctx: Pick<LanCliContext, "lang" | "fail">, only?: LanPeer): Promise<LanWhoPeer[]> {
   let peers: LanPeer[];
   try {
     peers = only === undefined ? activePeers() : [only];
   } catch (error) {
-    ctx.fail(L.stateError(error instanceof Error ? error.message : String(error)));
+    ctx.fail(lanMessages(ctx.lang).stateError(error instanceof Error ? error.message : String(error)));
   }
-  if (peers.length === 0) {
+  if (peers.length === 0) return [];
+  const id = loadOrCreateIdentity();
+  return Promise.all(peers.map(async (peer): Promise<LanWhoPeer> => {
+    try {
+      const who = await remoteWho(peer, id);
+      return {
+        peer: peer.label, name: who.name, status: "online",
+        entries: who.entries.map((entry) => ({ ...entry, address: `${entry.address}@${peer.label}` })),
+      };
+    } catch (error) {
+      const mismatch = error instanceof LanClientError && error.mismatches.length > 0;
+      return {
+        peer: peer.label, name: peer.name, status: mismatch ? "key-mismatch" : "offline", entries: [],
+        error: mismatch ? error.mismatches.join(", ") : error instanceof Error ? error.message : String(error),
+      };
+    }
+  }));
+}
+
+export async function printLanWho(ctx: Pick<LanCliContext, "lang" | "fail">, only?: LanPeer, json = false): Promise<void> {
+  const results = await listLanWho(ctx, only);
+  if (json) {
+    console.log(JSON.stringify(results, null, 2));
+    return;
+  }
+  const L = lanMessages(ctx.lang);
+  if (results.length === 0) {
     console.log(L.whoNoPeers);
     return;
   }
-  const id = loadOrCreateIdentity();
-  const results = await Promise.all(peers.map(async (peer) => {
-    try {
-      return { peer, who: await remoteWho(peer, id) };
-    } catch (error) {
-      return { peer, error };
-    }
-  }));
   for (const result of results) {
-    if ("error" in result) {
-      const e = result.error;
-      console.log(e instanceof LanClientError && e.mismatches.length > 0
-        ? L.keyMismatch(result.peer.label, e.mismatches.join(", "))
-        : L.whoOffline(result.peer.label, e instanceof Error ? e.message : String(e)));
+    if (result.status !== "online") {
+      console.log(result.status === "key-mismatch"
+        ? L.keyMismatch(result.peer, result.error ?? "")
+        : L.whoOffline(result.peer, result.error ?? ""));
       continue;
     }
-    console.log(L.whoHeader(result.peer.label, result.who.name));
-    if (result.who.entries.length === 0) console.log(L.whoEmpty);
-    for (const e of result.who.entries) {
-      console.log(L.whoEntry(`${e.address}@${result.peer.label}`, e.kind, e.status ?? "", e.label ?? ""));
+    console.log(L.whoHeader(result.peer, result.name));
+    if (result.entries.length === 0) console.log(L.whoEmpty);
+    for (const e of result.entries) {
+      console.log(L.whoEntry(e.address, e.kind, e.status ?? "", e.label ?? ""));
     }
   }
 }
@@ -722,7 +745,7 @@ export async function cmdLan(ctx: LanCliContext): Promise<void> {
       if (arg === undefined) ctx.fail(L.usage);
       return lanUnpair(ctx, arg);
     case "who":
-      return printLanWho(ctx, arg === undefined ? undefined : requirePeer(ctx, arg));
+      return printLanWho(ctx, arg === undefined ? undefined : requirePeer(ctx, arg), ctx.flags.has("json"));
     case "autostart": {
       if (arg !== "on" && arg !== "off") ctx.fail(L.usage);
       const plan = autostartPlan(process.platform, ctx.selfCommand);

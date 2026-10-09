@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { join } from "node:path";
+import { generateIdentity } from "../src/lan-crypto.ts";
+import { removePeer, trustPeer } from "../src/lan-store.ts";
 import { CLAUDE_NATIVE_SESSIONS_DIR_ENV } from "../src/claude-inject.ts";
 import { OCS_HOME_ENV, readReceipts } from "../src/store.ts";
 import { fakeClaudeInbox, type FakeInbox } from "./fake-claude";
@@ -50,6 +52,9 @@ function box(name: string, sessionName: string, sessionId: string, discoveryPort
   return {
     env: {
       ...inherited,
+      HOME: dir,
+      CODEX_HOME: join(dir, "codex"),
+      HERMES_GATEWAY_LOCK_DIR: join(dir, "hermes"),
       [OCS_HOME_ENV]: join(dir, "home"),
       [CLAUDE_NATIVE_SESSIONS_DIR_ENV]: sessionsDir,
       OCS_LANG: "en",
@@ -93,6 +98,10 @@ describe("ocs lan 端到端（两台机器）", () => {
     const portA = await freePort();
     const portB = await freePort();
     try {
+      const noPeers = await run(b, ["who", "--lan", "--json"]);
+      expect(noPeers.code).toBe(0);
+      expect(JSON.parse(noPeers.stdout).lan).toEqual([]);
+      expect(JSON.parse((await run(b, ["lan", "who", "--json"])).stdout)).toEqual([]);
       // 在 Codex 会话里启动：守护进程不许继承会话身份，否则它把这个 task 当「自己」永不唤醒
       const upA = await run(
         { ...a, env: { ...a.env, CODEX_THREAD_ID: "019a0000-0000-7000-8000-000000000001", OCS_NAME: "leaky" } },
@@ -188,6 +197,40 @@ describe("ocs lan 端到端（两台机器）", () => {
       expect(who.stdout).toContain("LAN alpha (alpha):");
       expect(who.stdout).toContain("claude-aaaaaaaa@alpha  claude  idle  worker-a");
 
+      const labeled = JSON.parse((await run(b, ["lan", "who", "alpha", "--json"])).stdout);
+      expect(labeled[0].entries).toContainEqual({
+        address: "claude-aaaaaaaa@alpha", kind: "claude", status: "idle", label: "worker-a",
+      });
+      expect((await run(a, ["rename", "audit-pilot-prompts"])).code).toBe(0);
+      const whoJson = await run(b, ["who", "--lan", "--json"]);
+      expect(whoJson.code).toBe(0);
+      const roster = JSON.parse(whoJson.stdout);
+      expect(roster.entries).toContainEqual(expect.objectContaining({ name: "tester" }));
+      expect(roster.lan).toEqual([{
+        peer: "alpha", name: "alpha", status: "online",
+        entries: [{ address: "audit-pilot-prompts@alpha", kind: "claude", status: "idle" }],
+      }]);
+      for (const args of [["lan", "who", "--json"], ["lan", "who", "alpha", "--json"]]) {
+        const remote = await run(b, args);
+        expect(remote.code).toBe(0);
+        expect(JSON.parse(remote.stdout)).toEqual(roster.lan);
+      }
+
+      const wrongPeer = trustPeer({
+        key: generateIdentity().identity.publicKey, name: "wrong-key", label: "wrong-key", addr: `127.0.0.1:${portA}`,
+      }, b.env);
+      try {
+        const mixed = JSON.parse((await run(b, ["who", "--lan", "--json"])).stdout).lan;
+        expect(mixed[0]).toEqual(roster.lan[0]);
+        expect(mixed[1]).toEqual({
+          peer: "wrong-key", name: "wrong-key", status: "key-mismatch", entries: [], error: expect.any(String),
+        });
+        const mismatch = JSON.parse((await run(b, ["lan", "who", "wrong-key", "--json"])).stdout);
+        expect(mismatch).toEqual([mixed[1]]);
+      } finally {
+        removePeer(wrongPeer.fingerprint, b.env);
+      }
+
       // A 的收件箱扣留（crossSessionInbound=hold）：第一阶段结果随应答回到 B，退出码 2；
       // 终态只记在 A 的频道日志里，不跨机回传，也不通知任何人。
       a.inbox.policy = "hold";
@@ -208,6 +251,14 @@ describe("ocs lan 端到端（两台机器）", () => {
       expect(a.frames.length).toBe(framesA + 1); // 只有那条唤醒；A 上没有可通知的发送方会话
       expect(b.frames.length).toBe(framesB); // 没有跨机终态通知
       a.inbox.policy = "accept";
+
+      expect((await run(a, ["lan", "down"])).code).toBe(0);
+      const offline = await run(b, ["who", "--lan", "--json"]);
+      expect(offline.code).toBe(0);
+      expect(JSON.parse(offline.stdout).lan).toEqual([{
+        peer: "alpha", name: "alpha", status: "offline", entries: [], error: expect.any(String),
+      }]);
+      expect((await run(a, ["lan", "up"])).code).toBe(0);
 
       // 解除配对后 A 再也进不了 B
       expect((await run(b, ["lan", "unpair", "alpha"])).code).toBe(0);

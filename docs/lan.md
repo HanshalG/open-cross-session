@@ -17,6 +17,11 @@ ocs who --lan                # A 上的 agent：claude-1a2b3c4d@mini …
 ocs dm claude-1a2b3c4d@mini "帮我看下 CI"
 ```
 
+结构化发现：`ocs who --lan --json` 保留本机 `entries` 并加入 `lan` 数组。每个对端包含
+`peer`、`name`、`status` 和 `entries`，远端地址已带 `@peer`。离线或公钥不匹配时
+`entries` 为空，`error` 说明原因；`status` 分别为 `offline` 或 `key-mismatch`。
+`ocs lan who [peer] --json` 只返回对端数组。
+
 A 那边被唤醒的会话看到发送者是 `claude-9f8e7d6c@laptop`，`Reply:` 行是
 `ocs dm claude-9f8e7d6c@laptop "<your reply>"`，复制执行就回到 B。
 
