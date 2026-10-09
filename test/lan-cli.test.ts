@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { generateIdentity } from "../src/lan-crypto.ts";
 import { removePeer, trustPeer } from "../src/lan-store.ts";
 import { CLAUDE_NATIVE_SESSIONS_DIR_ENV } from "../src/claude-inject.ts";
-import { OCS_HOME_ENV, readReceipts } from "../src/store.ts";
+import { OCS_HOME_ENV, readReceipts, readRoutedMessages } from "../src/store.ts";
 import { fakeClaudeInbox, type FakeInbox } from "./fake-claude";
 import { autoCleanupTempDirs, tempDir } from "./tmp";
 
@@ -259,6 +259,38 @@ describe("ocs lan 端到端（两台机器）", () => {
         peer: "alpha", name: "alpha", status: "offline", entries: [], error: expect.any(String),
       }]);
       expect((await run(a, ["lan", "up"])).code).toBe(0);
+
+      const codexIds = ["01a12044-bb78-7f72-81cf-9742bc7d1fc7", "01a12044-8f4a-7761-bff8-7f5d984d4e4e"];
+      const codexChannels: string[] = [];
+      for (const [i, id] of codexIds.entries()) {
+        const sender = { ...b, env: {
+          ...b.env, CODEX_THREAD_ID: id,
+          [CLAUDE_NATIVE_SESSIONS_DIR_ENV]: join(b.env[OCS_HOME_ENV]!, "no-claude-sessions"),
+        } };
+        const count = a.frames.length;
+        const sent = await run(sender, ["dm", "worker-a@alpha", `Codex private message ${i + 1}`]);
+        expect(sent.code).toBe(0);
+        const copied = /local copy #(lan-[0-9a-f]{32}) seq 1/.exec(sent.stdout)!;
+        expect(copied).not.toBeNull();
+        codexChannels.push(copied[1]!);
+        expect(readRoutedMessages(copied[1]!, { env: b.env })).toEqual([
+          expect.objectContaining({ body: `Codex private message ${i + 1}`, from_identity: `codex:${id}` }),
+        ]);
+        const received = note(await waitFor(() => a.frames[count]));
+        expect(received).toContain(`Reply: ocs dm ${id}@bee`);
+        const remoteChannel = /Thread: ocs read (lan-[0-9a-f]{32})/.exec(received)![1]!;
+        expect(readRoutedMessages(remoteChannel, { env: a.env })).toEqual([
+          expect.objectContaining({ body: `Codex private message ${i + 1}`, from_identity: expect.stringContaining(`:codex-${id}`) }),
+        ]);
+        if (i === 0) {
+          expect((await run(sender, ["rename", "renamed-codex"])).code).toBe(0);
+          const renamed = await run(sender, ["dm", "worker-a@alpha", "same chat after rename"]);
+          expect(renamed.code).toBe(0);
+          expect(renamed.stdout).toContain(`local copy #${copied[1]} seq 2`);
+          expect(note(await waitFor(() => a.frames[count + 1]))).toContain("Reply: ocs dm renamed-codex@bee");
+        }
+      }
+      expect(codexChannels[0]).not.toBe(codexChannels[1]);
 
       // 解除配对后 A 再也进不了 B
       expect((await run(b, ["lan", "unpair", "alpha"])).code).toBe(0);

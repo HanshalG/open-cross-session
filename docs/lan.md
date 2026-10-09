@@ -101,7 +101,8 @@ S → C  应答 {ok, …}                                             AEAD s2c #
 | `pair` | 任何人 | `{token, name}` | `{ok, name, expires_at?, uses?}` 或 `{ok:false, error}` |
 | `pair-request` (0.8+) | anyone, only while an approve invitation is open | `{name}` | after the human decides (≤75 s): `{ok, name, expires_at?, uses?}` or `{ok:false, error}` with `no-offer` / `busy` / `rejected` / `timeout` / `cancelled` |
 
-`from` 是对方回复用的地址（ocs 名字优先，否则短 id），`from_key` 是不随改名变的短 id。
+`from` 是对方回复用的地址（ocs 名字优先；Codex 没有名字时用完整 thread UUID，其它宿主用固定地址）。
+`from_key` 是不随改名变的身份地址：Codex 用 `codex-<完整 thread UUID>`，其它宿主保持原有地址。
 `outcome` 是远端唤醒阶梯的总体结果（`ok` / `failed` / `unknown`），映射到发送方退出码 0 / 2 / 3，
 语义同本机 DM：落盘了就别重发。目标是 Claude 会话时守护进程走带回执的唤醒（wake-protocol §6）：
 第一阶段结果在 `lines` 里（`accepted` / `HELD` / `NOT delivered: refused` …），被扣或被拒归入
@@ -115,12 +116,18 @@ S → C  应答 {ok, …}                                             AEAD s2c #
 两端各自落盘，频道名按同一规则派生，所以一来一回落在同一个频道：
 
 ```
-lan-<SHA-256(对端指纹 ‖ 0 ‖ 本机参与者短 id ‖ 0 ‖ 远端参与者短 id) 前 32 hex>
+lan-<SHA-256(对端指纹 ‖ 0 ‖ 本机参与者身份地址 ‖ 0 ‖ 远端参与者身份地址) 前 32 hex>
 ```
 
 接收方写 `from = <对方地址>.<label>`（`@` 不在 `NAME_RE` 里，旧二进制会拒读），route 旁车帧写
-`from_identity = lan:<对端指纹>:<对方短 id>`、`to_identity = <本机目标身份>`，`ocs inbox`
-据此认领；发送方在远端确认落盘**之后**写本机副本（`to_identity = lan:<对端指纹>:<目标短 id>`）。
+`from_identity = lan:<对端指纹>:<对方身份地址>`、`to_identity = <本机目标身份>`，`ocs inbox`
+据此认领；发送方在远端确认落盘**之后**写本机副本（`to_identity = lan:<对端指纹>:<目标身份地址>`）。
+
+Codex 的完整身份地址避免相同八位前缀的聊天共用频道。旧版对端仍可通过原有协议收发；
+每台机器升级后，该机器上的 Codex 会话使用完整身份地址。Codex 的新消息会使用新的频道，
+已有日志保留，可继续用原频道的 `ocs read` 或对应会话的 `ocs inbox` 读取。
+发送者地址与对端 label 合起来超过日志名称限制时，日志用固定哈希名加对端 label，
+route 旁车帧和唤醒中的回复地址仍保留完整身份。
 
 ## 配对
 

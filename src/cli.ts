@@ -127,7 +127,7 @@ import {
   upgradeCheckEnabled,
 } from "./upgrade.ts";
 
-export const OCS_VERSION = "0.8.2";
+export const OCS_VERSION = "0.8.3";
 
 const LANG = detectLang();
 const M = messages(LANG);
@@ -539,7 +539,7 @@ function lanContext(parsed: Parsed): LanCliContext {
 }
 
 /**
- * 跨机 DM 的发送方地址：宿主会话给 ocs 名字（对方回复用）和不变短 id（频道派生用）；
+ * 跨机 DM 的发送方地址：宿主会话给 ocs 名字（对方回复用）和固定身份地址（频道派生用）；
  * `--as` / OCS_NAME 显式指定时两者都是那个名字。
  */
 function lanDmSender(parsed: Parsed, from: string): LanDmSender {
@@ -553,8 +553,8 @@ function lanDmSender(parsed: Parsed, from: string): LanDmSender {
       ? claudeSessionIdentity(owner.session)
       : owner.kind === "hermes" ? hermesIdentity(owner.id) : `${owner.kind}:${owner.id.toLowerCase()}`;
     return {
-      display: name ?? id ?? from,
-      key: id ?? from,
+      display: name ?? (owner.kind === "codex" ? owner.id.toLowerCase() : id ?? from),
+      key: owner.kind === "codex" ? `codex-${owner.id.toLowerCase()}` : id ?? from,
       logFrom: from,
       identity: OCS_IDENTITY_RE.test(identity) ? identity : null,
     };

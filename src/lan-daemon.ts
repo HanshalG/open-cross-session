@@ -74,7 +74,7 @@ export function lanChannel(peerFingerprint: string, localKey: string, remoteKey:
 }
 
 export interface LocalAddress {
-  /** 频道派生用：不随改名变的短 id（没有时用名字）。 */
+  /** 频道派生用：Codex 用完整 thread id，其它宿主用固定地址。 */
   key: string;
   /** 给对方看、给对方回复用：ocs 名字优先。 */
   display: string;
@@ -100,8 +100,8 @@ export function localAddressOf(
     return { key: entryShortId(entry), display: entry.name };
   }
   if (resolved.kind === "codex-task" && resolved.threadId !== undefined) {
-    const key = `codex-${resolved.threadId.slice(0, 8)}`;
-    return { key, display: ocsNameFor({ kind: "codex", id: resolved.threadId }, names)?.name ?? key };
+    const key = `codex-${resolved.threadId.toLowerCase()}`;
+    return { key, display: ocsNameFor({ kind: "codex", id: resolved.threadId }, names)?.name ?? resolved.threadId.toLowerCase() };
   }
   if (resolved.kind === "pi" && resolved.piSessionId !== undefined) {
     const key = `pi-${resolved.piSessionId.slice(0, 8)}`;
@@ -185,9 +185,9 @@ export function scrubPids(line: string): string {
 
 export interface DmRequest {
   op: "dm";
-  /** 发送方给自己的回复地址（ocs 名字或短 id）。 */
+  /** 发送方给自己的回复地址（ocs 名字或宿主地址）。 */
   from: string;
-  /** 发送方的频道派生地址（短 id）。 */
+  /** 发送方的固定频道派生地址。 */
   from_key: string;
   to: string;
   body: string;
@@ -243,8 +243,9 @@ export async function handleLanDm(
   const channel = lanChannel(peer.fingerprint, local.key, fromKey);
   const remoteAddress = `${from}@${peer.label}`;
   // 频道日志里的 from 必须过 NAME_RE（'@' 不在字符集里，旧二进制会拒读整条）。
-  const logFrom = [`${from}.${peer.label}`, `${fromKey}.${peer.label}`].find((name) => NAME_RE.test(name));
-  if (logFrom === undefined) return { ok: false, error: "bad-request", detail: "sender name too long" };
+  // Long reply addresses keep their full identity in the route frame.
+  const logFrom = [`${from}.${peer.label}`, `${fromKey}.${peer.label}`].find((name) => NAME_RE.test(name))
+    ?? `peer-${createHash("sha256").update(fromKey).digest("hex").slice(0, 24)}.${peer.label}`;
   // Count a use only for a DM that is about to be stored (a typo'd address must not burn a
   // --once grant). Expired since the handshake, or the last use taken by a concurrent DM:
   // treat as unpaired and store nothing.

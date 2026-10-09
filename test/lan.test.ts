@@ -16,6 +16,9 @@ import {
   startClientHandshake,
   type LanIdentity,
 } from "../src/lan-crypto.ts";
+import { setOcsName } from "../src/names.ts";
+import { resetCodexCliProbeCache } from "../src/codex-queue.ts";
+import { holdRolloutAsCodex } from "./codex-holder";
 import { lanChannel, scrubPids, startLanServer, type LanServerHandle } from "../src/lan-daemon.ts";
 import { pairWithCode, remoteWho, sendRemoteDm, LanClientError } from "../src/lan-client.ts";
 import {
@@ -36,7 +39,8 @@ import { closePairOffer, redeemPairOffer } from "../src/lan-store.ts";
 import { createSocket } from "node:dgram";
 import { readdirSync } from "node:fs";
 import { startClientHandshake as clientHs } from "../src/lan-crypto.ts";
-import { OCS_HOME_ENV, readRoutedMessages } from "../src/store.ts";
+import { OCS_HOME_ENV, appendMessage, readRoutedMessages } from "../src/store.ts";
+import { listInboxThreads } from "../src/inbox.ts";
 import { autoCleanupTempDirs, tempDir } from "./tmp";
 
 autoCleanupTempDirs();
@@ -332,6 +336,92 @@ describe("配对", () => {
 });
 
 describe("已配对对端的请求", () => {
+  test("Codex chats sharing a short prefix keep separate LAN channels", async () => {
+    const a = machine("mini");
+    const b = machine("laptop");
+    const ids = ["01a12044-bb78-7f72-81cf-9742bc7d1fc7", "01a12044-8f4a-7761-bff8-7f5d984d4e4e"];
+    const day = join(a.env.CODEX_HOME!, "sessions", "2026", "10", "09");
+    mkdirSync(day, { recursive: true });
+    const bin = tempDir("ocs-lan-codex-bin-");
+    const argsLog = join(bin, "args.log");
+    writeFileSync(join(bin, "codex"), `#!/bin/sh
+printf '%s\\n' "$*" >> "$OCS_TEST_QUEUE_LOG"
+echo "Queued message 11111111-1111-2222-3333-444444444444 for thread $3."
+`, { mode: 0o755 });
+    a.env.PATH = `${bin}:/usr/bin:/bin`;
+    a.env.OCS_TEST_QUEUE_LOG = argsLog;
+    resetCodexCliProbeCache();
+    const holders: Awaited<ReturnType<typeof holdRolloutAsCodex>>[] = [];
+    const server = await serve(a);
+    try {
+      for (const [i, id] of ids.entries()) {
+        const path = join(day, `rollout-2026-10-09T10-00-00-${id}.jsonl`);
+        writeFileSync(path, "");
+        holders.push(await holdRolloutAsCodex(path));
+        expect(setOcsName(`audit-${i + 1}`, { kind: "codex", id }, { env: a.env }).ok).toBe(true);
+      }
+      await pairMachines(a, b, server, "lap");
+      const legacyChannel = lanChannel(b.identity.fingerprint, "codex-01a12044", "alice");
+      appendMessage({ channel: legacyChannel, from: "alice.lap", body: "earlier conversation", env: a.env,
+        from_identity: `lan:${b.identity.fingerprint}:alice`, to_identity: `codex:${ids[0]}` });
+      const replies: Array<{ channel: string; seq: number; to_key: string }> = [];
+      for (let i = 0; i < ids.length; i++) {
+        const result = await sendRemoteDm(findPeer("srv", b.env)!, b.identity, {
+          from: "alice", from_key: "alice", to: `audit-${i + 1}`, body: `private message ${i + 1}`, lang: "en",
+        }, b.env);
+        if (result.delivered === "unknown" || !result.reply.ok) throw new Error(JSON.stringify(result));
+        replies.push(result.reply);
+        if (result.reply.outcome !== "ok") throw new Error(JSON.stringify(result.reply));
+      }
+      expect(replies[0]!.channel).not.toBe(replies[1]!.channel);
+      for (const [i, reply] of replies.entries()) {
+        expect(reply.seq).toBe(1);
+        expect(reply.to_key).toBe(`codex-${ids[i]}`);
+        expect(readRoutedMessages(reply.channel, { env: a.env })).toEqual([
+          expect.objectContaining({ body: `private message ${i + 1}`, to_identity: `codex:${ids[i]}` }),
+        ]);
+      }
+      expect(readRoutedMessages(legacyChannel, { env: a.env })[0]!.body).toBe("earlier conversation");
+      for (const [i, id] of ids.entries()) {
+        const inbox = listInboxThreads({ primaryName: `audit-${i + 1}`, identities: [`codex:${id}`], mentionNames: [] }, a.env);
+        expect(inbox.map((t) => t.channel).sort()).toEqual(
+          [replies[i]!.channel, ...(i === 0 ? [legacyChannel] : [])].sort(),
+        );
+      }
+      const queued = readFileSync(argsLog, "utf8");
+      for (const id of ids) expect(queued).toContain(`--thread ${id}`);
+    } finally {
+      for (const holder of holders) await holder.stop();
+      await server.close();
+      resetCodexCliProbeCache();
+    }
+  }, T);
+
+  test("long valid sender addresses and peer labels remain deliverable", async () => {
+    const a = machine("mini");
+    const b = machine("laptop");
+    const server = await serve(a);
+    const worker = fakeClaude(a, "worker-a", "ae38e21b-1111-2222-3333-444455556666");
+    const label = "l".repeat(32);
+    const from = "01a12044-bb78-7f72-81cf-9742bc7d1fc7";
+    try {
+      await pairMachines(a, b, server, label);
+      const result = await sendRemoteDm(findPeer("srv", b.env)!, b.identity, {
+        from, from_key: `codex-${from}`, to: "worker-a", body: "long address", lang: "en",
+      }, b.env);
+      if (result.delivered === "unknown" || !result.reply.ok) throw new Error(JSON.stringify(result));
+      expect(result.reply.outcome).toBe("ok");
+      expect(content(await waitFor(() => worker.frames[0]))).toContain(`Reply: ocs dm ${from}@${label}`);
+      const [stored] = readRoutedMessages(result.reply.channel, { env: a.env });
+      expect(stored!.from.length).toBeLessThanOrEqual(64);
+      expect(stored!.from.endsWith(`.${label}`)).toBe(true);
+      expect(stored!.from_identity).toBe(`lan:${b.identity.fingerprint}:codex-${from}`);
+    } finally {
+      worker.close();
+      await server.close();
+    }
+  }, T);
+
   test("远端 DM：落 lan-* 频道、唤醒本机会话、发送者显示为 x@label、Reply 行可直接回", async () => {
     const a = machine("mini");
     const b = machine("laptop");

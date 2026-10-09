@@ -328,6 +328,11 @@ ready-to-use `address@peer` addresses. A peer whose connection fails has empty
 entries and an `error`; `status` distinguishes `offline` from `key-mismatch`.
 `ocs lan who [peer] --json` returns only the peer array.
 
+Codex LAN conversations use full thread IDs, so chats sharing an eight-character
+prefix keep separate logs. Existing Codex LAN logs remain available through
+`ocs read <old-channel>` or `ocs inbox`; new exchanges use the full-ID channel.
+The wire format remains compatible with older peers.
+
 Pairing stays trusted until you run `ocs lan unpair <peer>`. Use `--for 30m|2h|7d`
 for a timed pairing or `--once` for a single message. Both sides get the same terms;
 explicitly timed or single-use peers are refused when their limits are reached.

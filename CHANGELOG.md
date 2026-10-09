@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.3
+
+Separate LAN conversations for Codex chats with colliding short IDs.
+
+- Codex senders and targets use their full thread UUID in LAN channel keys. Chats sharing an eight-character prefix keep separate logs and route identities, while renaming a chat keeps its channel.
+- A Codex sender without an OCS alias supplies its full thread UUID as the reply address, avoiding ambiguous short replies.
+- Valid long sender addresses and peer labels no longer fail the log's name-length check; route frames and wake replies retain the complete identity.
+- Codex queue delivery honors the supplied environment for both terminal and Desktop fallback paths.
+- The existing LAN wire fields remain compatible with older peers. New Codex exchanges use full-ID channels; previous logs remain available via their old channel or the owning chat's inbox.
+
 ## 0.8.2
 
 Structured LAN discovery for agent tools.

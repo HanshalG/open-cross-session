@@ -644,7 +644,7 @@ export function lanPeerCount(): number {
 export interface LanDmSender {
   /** 对方回复用的地址（ocs 名字 > 短 id > 发送者名）。 */
   display: string;
-  /** 频道派生用（短 id > 发送者名）。 */
+  /** 频道派生用的固定身份地址。 */
   key: string;
   /** 本机副本的 from（频道日志里的名字）。 */
   logFrom: string;
