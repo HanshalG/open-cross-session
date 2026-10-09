@@ -85,6 +85,40 @@ Supported creation paths: [Codex projects and chats](https://learn.chatgpt.com/c
 [Claude desktop](https://code.claude.com/docs/en/desktop), and
 [Claude CLI reference](https://code.claude.com/docs/en/cli-reference).
 
+## Diagnose a paired computer reported offline
+
+Start with `ocs version`, `ocs lan status --json`, and
+`ocs lan who <listed-peer-label> --json`. Use that computer's local peer label;
+labels can differ between computers. These checks discover sessions without
+sending a task message. Ask the other person for the same outputs when the
+problem is only in their direction; do not message their agents as a test without
+user authorization.
+
+- Ping and an accepting TCP port do not prove OCS authentication. A successful
+  `lan who` verifies an authenticated roster request in that direction, not the
+  reverse direction or delivery of a message to a chat.
+- Check the daemon's version in `lan status`, not only the CLI version. A release
+  availability notice describes the local update check; it does not identify the
+  remote computer's installed version.
+- A key mismatch means the listener presented a different identity from the
+  pinned peer. Verify the intended computer and its `lan status` fingerprint
+  before proposing a new human-confirmed pairing. Do not delete keys or trust
+  an unexpected identity to make the error disappear.
+- An explicit `no longer trusts this machine` error indicates the remote side
+  did not grant current trust. Each computer controls its own expiry and use
+  limit; making trust permanent here does not change the other computer.
+- `closed`, `timeout`, or `connect-failed` alone does not establish a pairing or
+  version mismatch. Preserve the full error and attempted address. On the
+  listening computer, inspect recent `~/.ocs/lan/daemon.log` entries for a matching
+  connection; use its configured OCS data directory if overridden. A closed
+  connection alone does not prove the listener rejected pairing.
+
+`ocs lan peers` lists stored peers but also prunes expired or exhausted grants;
+report that effect when using it. Do not disable the firewall or re-pair based
+only on an `offline` summary. If authenticated discovery succeeds but a chat is
+absent, investigate whether that chat is live or renderer-open before changing
+network settings. Include the observed direction and exact error in the result.
+
 ## Install
 
 If `ocs` is not on PATH, install the GitHub Release binary (no token needed):
