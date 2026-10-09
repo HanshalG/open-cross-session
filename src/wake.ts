@@ -35,6 +35,7 @@ import { codexSessionsRoot, isCodexThreadId, listCodexSessions } from "./codex-s
 import { messages } from "./i18n.ts";
 import { hermesSessionKeyFromTarget } from "./hermes.ts";
 import { piSessionIdFromTarget } from "./pi-sessions.ts";
+import { claudeEntryMatches, claudeShortId, readOcsName } from "./names.ts";
 
 /** 正文 UTF-8 字节数在此以内逐字内联（协议 §1）。 */
 export const WAKE_BODY_INLINE_MAX_BYTES = 4096;
@@ -298,6 +299,7 @@ export function findSelfClaudePid(
  * - 排除 selfNames（发送者的 from 名——`--as` 指定或自动识别的那个）。#3 现场：正文里
  *   写「回复时 @我」把自己也叫醒了；按名字再排一次，祖先链识别失手时也不回环。
  * - 同名多会话不消歧、全部命中（本地个人场景下同名即同人多开，都该被叫醒）。
+ * - ocs 名字和短 id 必须唯一，只唤醒对应进程。
  */
 export function selectWakeTargets(
   mentions: readonly string[],
@@ -314,6 +316,23 @@ export function selectWakeTargets(
     if (exact.length > 0) {
       matchedNames.add(mention);
       for (const session of exact) selectedPids.add(session.pid);
+      continue;
+    }
+    const named = readOcsName(mention, options.env);
+    if (named !== null) {
+      const owners = sessions.filter((session) => claudeEntryMatches(named, session));
+      if (owners.length === 1) {
+        matchedNames.add(mention);
+        selectedPids.add(owners[0]!.pid);
+      }
+      continue;
+    }
+    if (/^claude-[0-9a-f]{8}$/i.test(mention)) {
+      const owners = sessions.filter((session) => claudeShortId(session.sessionId) === mention.toLowerCase());
+      if (owners.length === 1) {
+        matchedNames.add(mention);
+        selectedPids.add(owners[0]!.pid);
+      }
       continue;
     }
     const aliases = sessions.filter((session) => claudeWorkspaceTargetMatches(session, mention));

@@ -1,6 +1,6 @@
 ---
 name: ocs
-description: Talk to any other AI coding agent on this machine or a paired machine on the same LAN (Claude Code sessions, Codex tasks, Pi sessions, terminal TUIs) over open-cross-session. Use when asked to discuss with, delegate to, wake, or message another agent/session (local, or <address>@<peer> on another computer), or to check what other agents are running.
+description: Discover and message AI coding agents with open-cross-session on this computer or a paired LAN computer. Use for cross-agent discussion, delegation, waking or checking sessions, and creating a Claude Code or Codex desktop chat for this collaboration.
 ---
 
 # ocs — talk to other agents, here and on your other computers
@@ -8,6 +8,82 @@ description: Talk to any other AI coding agent on this machine or a paired machi
 Discover who is reachable, then message them. Channels are plumbing — you never
 need to create or manage them. Agents on a paired computer in the same LAN are
 addressed as `<address>@<peer>` (`ocs who --lan` lists them).
+
+## Default workflow
+
+1. Discover with `ocs who`, or `ocs who --lan --json` for another computer. Match
+   the user's requested chat using its title, project and listed address. Refresh
+   the roster before sending; old short IDs can collide or refer to closed chats.
+2. Message an existing chat with `ocs dm <listed-address> "<text>"`. Use a unique
+   OCS name when available. If addressing is ambiguous, inspect `ocs who --verbose`
+   and select the exact intended session; never choose the first matching process.
+3. Create a new chat only when the user requests one. Use the desktop workflow
+   below by default. A missing roster entry alone is not a reason to create a chat.
+4. Report the address and actual delivery result. For a response, read the channel
+   printed by OCS or use `ocs inbox`; message acceptance does not prove a reply.
+
+## Create chats in desktop apps by default
+
+Prefer **Codex Desktop** and **Claude Desktop's Code tab**, with local execution.
+Honor an explicit choice of terminal, cloud, SSH or worktree. Carry over the
+requested project/folder, task and useful context; preserve the app's configured
+model and permission settings unless the user requests a change.
+
+### Codex Desktop
+
+- If available, use the native `create_thread` tool (such as
+  `mcp__codex_app__create_thread`). For repository work, call `list_projects` and
+  match the intended folder and use its returned project ID with
+  `environment: {type: "local"}`. If the folder is not registered, use the app's
+  project-selection UI rather than an unrelated project. For work
+  without a repository, use `target: {type: "projectless"}`. Supply a clear title
+  and a self-contained task prompt. Only request a worktree or override the model
+  when authorized. Use `fork_thread` when the user asks to retain chat history.
+- Creation can return a pending client ID; it is not a usable thread ID. Follow
+  the tool's completion/status instructions, then verify the native chat exists.
+- If the native tool is unavailable, use an available computer-use tool to create
+  the chat in Codex Desktop. Do not start `codex exec`, a separate app-server, or
+  a terminal agent and describe it as a Desktop chat. If neither route is
+  available, report the missing capability and give the user the next UI step.
+
+### Claude Desktop: Code tab
+
+- On macOS or x64 Windows with Claude Code v2.1.285+ and subscription sign-in,
+  run `claude --desktop` **from the intended project directory** to open Desktop's
+  new-session page. Check `claude --help` if support is uncertain. This command
+  takes **no prompt, name, model or permission flags**; Desktop starts the session.
+- Use an available computer-use tool to verify the **Code** tab, **Local**
+  environment and folder, enter the requested task and submit it. If the CLI
+  opener is unavailable, use **New session** in the Code tab (Cmd+N on macOS,
+  Ctrl+N on Windows). If UI control is unavailable, report that the composer is
+  open and ask the user to submit the task; do not claim a session is running.
+- For an explicitly requested existing CLI session, use
+  `claude --desktop --resume <session-UUID>`; `--continue` picks the latest session
+  in that directory. Neither is the new-chat default. Avoid `claude -p` or
+  `claude --bg` as a replacement for a Code-tab chat.
+
+### Make the new chat reachable
+
+After submission, verify its native title/folder and refresh `ocs who --verbose`.
+Run discovery from the new chat's project directory when checking project-scoped
+Claude sessions. If creation's outcome is unknown, inspect the app's chat list
+before trying again; avoid duplicate chats and duplicate initial task prompts.
+An open composer is not an OCS agent. Codex must be renderer-open or have a live
+rollout holder; Claude must have a live registered session and messaging socket.
+Give the chat a meaningful native title. If it needs a memorable OCS alias, have
+**that chat** run `ocs rename <name>`; running it here renames the sender instead.
+Pass the caller's `ocs whoami --json` address and requested reply task in the new
+chat's prompt when communication back is part of the assignment. Return the
+verified address, adding `@peer` for another computer.
+
+OCS transports messages to existing agents; it has no `ocs create` command or
+remote chat-creation RPC. Creation on another computer requires an explicitly
+authorized request to an agent there that can operate its desktop, or action by
+that computer's user. A remote folder path is not a local folder path.
+
+Supported creation paths: [Codex projects and chats](https://learn.chatgpt.com/codex/projects),
+[Claude desktop](https://code.claude.com/docs/en/desktop), and
+[Claude CLI reference](https://code.claude.com/docs/en/cli-reference).
 
 ## Install
 
@@ -127,8 +203,9 @@ ocs dm <address>@<peer> "<text>" # message + wake an agent on a paired machine
   the message and sends one combined wake when the turn ends, skipping anything
   the receiver already read (`wake deferred`). A combined wake's first line says
   how many earlier messages are unread — read the thread before acting on it.
-- To keep a conversation going, end your message with the peer's @name so they wake
-  (you are never woken by your own @).
+- `ocs dm` wakes its target without an @mention. For a channel reply, use the
+  incoming note's `Reply:` command or `ocs send <channel> "<text>" --reply-to <seq>`;
+  plain channel sends need a unique @mention to wake someone.
 - Replying with `ocs dm <workspace-alias>` reuses the stable or explicitly
   inherited conversation channel.
 - After a restart, `ocs inbox` lists only unread threads that can be proven to

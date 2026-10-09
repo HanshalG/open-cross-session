@@ -560,8 +560,14 @@ function resolveNamedTarget(
   if (named.kind === "codex") return { ...resolveDmTarget(named.id, env)!, via: "ocs-name" };
   if (named.kind === "pi") return { ...resolveDmTarget(piTargetName(named.id), env)!, via: "ocs-name" };
   if (named.kind === "hermes") return { ...resolveDmTarget(hermesTargetName(named.id), env)!, via: "ocs-name" };
-  const live = sessions.find((candidate) => claudeEntryMatches(named, candidate));
-  if (live !== undefined) return { ...claudeTarget(live, sessions, env), via: "ocs-name" };
+  const live = sessions.filter((candidate) => claudeEntryMatches(named, candidate));
+  if (live.length > 1) {
+    return {
+      kind: "claude", name: named.name, identity: `name:${named.name}`,
+      ambiguousNameTargets: live.map((session) => `${session.name!}(pid ${session.pid})`),
+    };
+  }
+  if (live[0] !== undefined) return { ...claudeTarget(live[0], sessions, env), via: "ocs-name" };
   return {
     kind: "claude",
     name: named.name,
@@ -631,7 +637,12 @@ export function canonicalWakeAddress(address: string, env: NodeJS.ProcessEnv = p
   if (resolved.kind === "codex-task" && resolved.threadId !== undefined) return resolved.threadId;
   if (resolved.kind === "pi" && resolved.piSessionId !== undefined) return piTargetName(resolved.piSessionId);
   if (resolved.kind === "hermes" && resolved.hermesSessionKey !== undefined) return hermesTargetName(resolved.hermesSessionKey);
-  if (resolved.kind === "claude" && resolved.claude?.name) return resolved.claude.name;
+  if (resolved.kind === "claude" && resolved.claude?.name) {
+    // Preserve the unique address when the native name would broadcast to several sessions.
+    const name = resolved.claude.name;
+    const matches = listNativeSessions(env).filter((session) => session.name === name);
+    return matches.length === 1 ? name : address;
+  }
   return address;
 }
 
@@ -733,7 +744,14 @@ export function resolveDmTarget(
   }
   if (!NAME_RE.test(target)) return null;
   const sessions = listNativeSessions(env).filter((session) => session.name !== null);
-  const session = sessions.find((candidate) => candidate.name === target);
+  const exact = sessions.filter((candidate) => candidate.name === target);
+  if (exact.length > 1) {
+    return {
+      kind: "claude", name: target, identity: `name:${target}`,
+      ambiguousNameTargets: exact.map((session) => `${session.name!}(pid ${session.pid})`),
+    };
+  }
+  const session = exact[0];
   // 顺序：活会话精确名 > ocs 名字 > claude-<8hex> > 工作区别名。精确名与 ocs 名字指向
   // 不同会话时不许任选——哪个赢都可能把私信投给另一个人。
   const named = readOcsName(target, env);

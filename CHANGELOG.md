@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.8
+
+The OCS skill defaults to native desktop chats, and Claude addressing keeps a unique alias or ID attached to its intended session.
+
+- The skill explains Codex's native creation tools and Claude Desktop's local Code-tab workflow, including the supported `claude --desktop` opener, submitting the task, and verifying the new session's OCS address.
+- Discovery, ambiguous names, reply routing and delivery reporting have an explicit workflow. Opening a composer is distinguished from creating a reachable session; remote creation requires action on the remote computer.
+- DMs reject duplicate native Claude names and OCS aliases matching multiple live processes instead of choosing the first process. LAN requests return `ambiguous` without storing a message or waking a session.
+- Alias and short-ID mentions retain their selected process when several sessions share a native name. Ambiguous aliases and short IDs wake nobody.
+- Ordinary channel mentions of a native name retain their existing behavior of waking matching sessions.
+
 ## 0.8.7
 
 LAN startup recovers from stale daemon state after a crash or reboot.

@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { connect, createServer, type Server, type Socket } from "node:net";
 import { join } from "node:path";
-import { CLAUDE_NATIVE_SESSIONS_DIR_ENV } from "../src/claude-inject.ts";
+import { CLAUDE_NATIVE_SESSIONS_DIR_ENV, listNativeSessions } from "../src/claude-inject.ts";
 import {
   AeadStream,
   crockfordDecode,
@@ -336,6 +336,47 @@ describe("配对", () => {
 });
 
 describe("已配对对端的请求", () => {
+  test("ambiguous Claude native names store nothing and wake nobody", async () => {
+    const a = machine("mini");
+    const b = machine("laptop");
+    const first = fakeClaude(a, "worker", "aaaaaaaa-1111-2222-3333-444444444444");
+    const second = fakeClaude(a, "worker", "bbbbbbbb-1111-2222-3333-444444444444");
+    const server = await serve(a);
+    try {
+      await pairMachines(a, b, server);
+      const peer = findPeer("srv", b.env)!;
+      const payload = { from: "alice", from_key: "alice", body: "private request", lang: "en" as const };
+      const result = await sendRemoteDm(peer, b.identity, { ...payload, to: "worker" }, b.env);
+      expect(result).toMatchObject({ delivered: true, reply: { ok: false, error: "ambiguous" } });
+      const channels = join(a.env[OCS_HOME_ENV]!, "channels");
+      expect(existsSync(channels) ? readdirSync(channels) : []).toEqual([]);
+      expect(first.frames).toEqual([]);
+      expect(second.frames).toEqual([]);
+      const unique = await sendRemoteDm(peer, b.identity, { ...payload, to: "claude-bbbbbbbb" }, b.env);
+      expect(unique).toMatchObject({ delivered: true, reply: { ok: true, outcome: "ok" } });
+      const frame = await waitFor(() => second.frames[0]);
+      expect(content(frame)).toContain("private request");
+      expect(first.frames).toEqual([]);
+      const secondSession = listNativeSessions(a.env).find((session) => session.sessionId === "bbbbbbbb-1111-2222-3333-444444444444");
+      if (!secondSession) throw new Error("second Claude session is missing");
+      expect(setOcsName("second-worker", { kind: "claude", session: secondSession }, { env: a.env }).ok).toBe(true);
+      const cli = Bun.spawn([process.execPath, join(import.meta.dir, "..", "src", "cli.ts"),
+        "send", "specific-mention", "only this session @second-worker", "--as", "alice"],
+        { env: a.env, stdout: "pipe", stderr: "pipe" });
+      const [code, stdout, stderr] = await Promise.all([
+        cli.exited, new Response(cli.stdout).text(), new Response(cli.stderr).text(),
+      ]);
+      expect({ code, stderr }).toEqual({ code: 0, stderr: "" });
+      expect(stdout).toContain("wake:");
+      expect(content(await waitFor(() => second.frames[1]))).toContain("only this session");
+      expect(first.frames).toEqual([]);
+    } finally {
+      first.close();
+      second.close();
+      await server.close();
+    }
+  }, T);
+
   test("Codex chats sharing a short prefix keep separate LAN channels", async () => {
     const a = machine("mini");
     const b = machine("laptop");

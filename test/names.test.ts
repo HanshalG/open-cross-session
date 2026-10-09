@@ -13,6 +13,7 @@ import {
 } from "../src/names.ts";
 import { canonicalWakeAddress, resolveDmTarget, shadowFreeWorkspaceAlias } from "../src/roster.ts";
 import { OCS_HOME_ENV } from "../src/store.ts";
+import { selectWakeTargets } from "../src/wake.ts";
 import { autoCleanupTempDirs, tempDir } from "./tmp";
 
 autoCleanupTempDirs();
@@ -120,6 +121,37 @@ describe("ocs 名字存储", () => {
 });
 
 describe("按名字 / 短 id 寻址", () => {
+  test("duplicate native Claude names require a unique alias or ID", () => {
+    const { env, self, other } = world();
+    const duplicate = { ...other, name: self.name };
+    writeFileSync(join(env[CLAUDE_NATIVE_SESSIONS_DIR_ENV]!, `${other.pid}.json`), JSON.stringify(duplicate), { mode: 0o600 });
+    const byName = resolveDmTarget(self.name!, env);
+    expect(byName?.claude).toBeUndefined();
+    expect(byName?.ambiguousNameTargets).toHaveLength(2);
+    expect(resolveDmTarget("claude-7043ea85", env)?.claude?.pid).toBe(self.pid);
+    expect(resolveDmTarget("claude-9f00aa11", env)?.claude?.pid).toBe(other.pid);
+    expect(setOcsName("second-worker", { kind: "claude", session: duplicate }, { env }).ok).toBe(true);
+    expect(resolveDmTarget("second-worker", env)?.claude?.pid).toBe(other.pid);
+    const address = canonicalWakeAddress("second-worker", env);
+    expect(selectWakeTargets([address], { env }).targets.map((session) => session.pid)).toEqual([other.pid]);
+    expect(selectWakeTargets([canonicalWakeAddress("claude-9f00aa11", env)], { env }).targets.map((session) => session.pid))
+      .toEqual([other.pid]);
+  });
+
+  test("an OCS name matching multiple live Claude processes is ambiguous", () => {
+    const { env, self, other } = world();
+    expect(setOcsName("helper", { kind: "claude", session: self }, { env }).ok).toBe(true);
+    writeFileSync(join(env[CLAUDE_NATIVE_SESSIONS_DIR_ENV]!, `${other.pid}.json`),
+      JSON.stringify({ ...other, sessionId: self.sessionId }), { mode: 0o600 });
+    const byName = resolveDmTarget("helper", env);
+    expect(byName?.claude).toBeUndefined();
+    expect(byName?.ambiguousNameTargets).toHaveLength(2);
+    expect(resolveDmTarget(self.name!, env)?.claude?.pid).toBe(self.pid);
+    expect(resolveDmTarget(other.name!, env)?.claude?.pid).toBe(other.pid);
+    expect(selectWakeTargets([canonicalWakeAddress("helper", env)], { env }).targets).toEqual([]);
+    expect(selectWakeTargets([canonicalWakeAddress("claude-7043ea85", env)], { env }).targets).toEqual([]);
+  });
+
   test("ocs 名字解析到底层活会话，频道身份与精确名一致", () => {
     const { env, other } = world();
     setOcsName("helper", { kind: "claude", session: other }, { env });
