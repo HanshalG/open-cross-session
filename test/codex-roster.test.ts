@@ -99,4 +99,29 @@ describe("desktop roster titles", () => {
     expect(setOcsName("reviewer", { kind: "codex", id: A }, { env: f.env }).ok).toBe(true);
     expect(codexRosterName(listCodexRosterSessions(f.root)[0]!, listOcsNames(f.env), f.env)).toBe("reviewer");
   });
+
+  test("sidebar renames update labels while keeping the existing routing address", () => {
+    const f = fixture();
+    add(f, A, "Audit pilot prompts");
+    const before = listCodexRosterSessions(f.root)[0]!;
+    const address = codexRosterName(before, listOcsNames(f.env), f.env)!;
+    f.db.query("UPDATE threads SET name = ? WHERE id = ?").run("Mega dataset audit", A);
+    f.db.close();
+    const after = listCodexRosterSessions(f.root)[0]!;
+    expect(after.summary).toBe("Mega dataset audit");
+    expect(codexRosterName(after, listOcsNames(f.env), f.env)).toBe(address);
+    expect(resolveDmTarget(address, f.env)?.threadId).toBe(A);
+  });
+
+  test("sidebar renames preserve an explicitly assigned address", () => {
+    const f = fixture();
+    add(f, A, "Audit pilot prompts");
+    expect(setOcsName("dataset-reviewer", { kind: "codex", id: A }, { env: f.env }).ok).toBe(true);
+    f.db.query("UPDATE threads SET name = ? WHERE id = ?").run("Mega dataset audit", A);
+    f.db.close();
+    const after = listCodexRosterSessions(f.root)[0]!;
+    expect(after.summary).toBe("Mega dataset audit");
+    expect(codexRosterName(after, listOcsNames(f.env), f.env)).toBe("dataset-reviewer");
+    expect(resolveDmTarget("dataset-reviewer", f.env)?.threadId).toBe(A);
+  });
 });

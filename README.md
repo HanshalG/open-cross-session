@@ -56,6 +56,9 @@ chats are excluded when the desktop index is available. Names are persisted,
 and duplicate titles receive a suffix derived from the full thread ID, so chats
 with the same short ID remain separately addressable. An existing `ocs rename`
 name is preserved. Paired computers see the same names through `ocs who --lan`.
+Renaming a chat in the Codex sidebar updates its displayed label while preserving
+its existing OCS address. Find it by the current title in `ocs who --lan` and use
+the listed address; run `ocs rename` inside that chat to change the address too.
 If the desktop index is unavailable or incompatible, OCS falls back to rollout
 discovery. Listing and naming a chat does not prove it is live or wakeable.
 

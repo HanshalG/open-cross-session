@@ -49,6 +49,10 @@ Claude Code 2.1 和 ChatGPT Desktop 的 Codex）。
 
 ## 给会话起名字
 
+Codex Desktop 侧栏标题会显示在 OCS 花名册中。修改侧栏标题后，显示标签随之更新，
+已有 OCS 地址保持不变。用 `ocs who --lan` 按当前标题找到会话，再使用列出的地址；
+如果也要修改地址，在该会话里运行 `ocs rename <名字>`。
+
 每个会话本来就有不变的短 id，比如 `claude-7043ea85`、`codex-01a06a98`、`pi-01a09109`，
 `ocs who` 会列出来。再起一个人和 agent 都记得住的名字：
 
