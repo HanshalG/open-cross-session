@@ -1,15 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { chmodSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { spawn, spawnSync } from "node:child_process";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { codexSessionsRoot, listCodexSessions } from "../src/codex-sessions.ts";
-import { codexRolloutHolderPids } from "../src/codex-queue.ts";
 import { discoverCodexDesktopOwners } from "../src/codex-ipc.ts";
 import { appendMessage, readMessages } from "../src/store.ts";
 import { pickCodexSourceThread, splitWakeMentions, wakeCodexTask } from "../src/wake.ts";
 import { autoCleanupTempDirs, tempDir } from "./tmp";
+import { holdRolloutAsCodex } from "./codex-holder";
 
 autoCleanupTempDirs();
 
@@ -35,39 +34,6 @@ function rolloutFixture(options: { withThreadC?: boolean } = {}): NodeJS.Process
   writeFileSync(join(day, `rollout-2026-08-31T10-00-00-${THREAD_A}.jsonl`), meta("/tmp/a"));
   writeFileSync(join(day, `rollout-2026-08-31T11-00-00-${THREAD_B}.jsonl`), meta("/tmp/b"));
   return { CODEX_HOME: codexHome };
-}
-
-/**
- * 起一个真名叫 `codex` 的进程持有 rollout fd —— 判活除了「有人持有」还要求持有者
- * 确实是个 codex 会话（issue #35），所以测试不能再拿自己的 fd 冒充。
- */
-function holdRolloutAsCodex(rollout: string): { pid: number; stop: () => void } {
-  // 必须是二进制本体叫 codex：脚本 + shebang 的话 ps 报的是解释器路径，判活会（正确地）拒绝。
-  const bin = join(tempDir("ocs-fakecodex-"), "codex");
-  copyFileSync("/bin/sh", bin);
-  chmodSync(bin, 0o755);
-  const child = spawn(bin, ["-c", `exec 3< "$1"; while :; do sleep 1; done`, "sh", rollout], {
-    stdio: "ignore",
-  });
-  // lsof 要看到那个 fd 已经打开：轮询到命中为止，别用固定 sleep。
-  const threadId = rolloutThreadId(rollout);
-  const env = { CODEX_HOME: codexHomeOf(rollout) };
-  const deadline = Date.now() + 10_000;
-  while (Date.now() < deadline) {
-    if (codexRolloutHolderPids([threadId], env).size > 0) break;
-    spawnSync("sleep", ["0.05"]);
-  }
-  return { pid: child.pid!, stop: () => child.kill("SIGKILL") };
-}
-
-/** rollout 文件名尾部的 UUID。 */
-function rolloutThreadId(rollout: string): string {
-  return rollout.slice(-("00000000-0000-0000-0000-000000000000".length + ".jsonl".length), -".jsonl".length);
-}
-
-/** rollout 路径 → CODEX_HOME（.../sessions/YYYY/MM/DD/rollout-*.jsonl）。 */
-function codexHomeOf(rollout: string): string {
-  return join(rollout, "..", "..", "..", "..", "..");
 }
 
 describe("codex-sessions（rollout 发现）", () => {
@@ -301,7 +267,7 @@ echo "Queued message 01a079c9-7318-7192-ae2c-8078515ad91a for thread $3."
 `,
       { mode: 0o755 },
     );
-    const holder = holdRolloutAsCodex(rollout);
+    const holder = await holdRolloutAsCodex(rollout);
     try {
       const result = await runCli(
         router,
@@ -313,7 +279,7 @@ echo "Queued message 01a079c9-7318-7192-ae2c-8078515ad91a for thread $3."
       expect(router.startTurnRequests.length).toBe(0);
       expect(readFileSync(queueLog, "utf8")).toContain(`--thread ${THREAD_A}`);
     } finally {
-      holder.stop();
+      await holder.stop();
       router.close();
     }
   }, T);
@@ -348,7 +314,7 @@ echo "Queued message 01a079c9-7318-7192-ae2c-8078515ad91a for thread $3."
       "sessions", "2026", "08", "31",
       `rollout-2026-08-31T10-00-00-${THREAD_A}.jsonl`,
     );
-    const holder = holdRolloutAsCodex(rollout);
+    const holder = await holdRolloutAsCodex(rollout);
     try {
       const result = await runCli(router, ["who", "--json"]);
       expect(result.code).toBe(0);
@@ -359,7 +325,7 @@ echo "Queued message 01a079c9-7318-7192-ae2c-8078515ad91a for thread $3."
       expect(codex.map((entry) => entry.threadId)).toEqual([THREAD_A]);
       expect(codex[0]!.livePid).toBe(holder.pid);
     } finally {
-      holder.stop();
+      await holder.stop();
       router.close();
     }
   }, T);

@@ -15,6 +15,7 @@ import {
   resetCodexCliProbeCache,
 } from "../src/codex-queue.ts";
 import { autoCleanupTempDirs, tempDir } from "./tmp";
+import { holdRolloutAsCodex } from "./codex-holder";
 
 autoCleanupTempDirs();
 
@@ -97,13 +98,33 @@ describe("codex-queue：活性判定（rollout fd 持有者）", () => {
     const { env, live } = rolloutFixture();
     const fd = openSync(live, "r");
     try {
-      // 跑测试的 bun/node 持有着 fd，但它不是 codex 会话——判活必须拒绝它。
-      expect(codexThreadLivePid(THREAD_LIVE, env)).toBeNull();
-      expect(codexThreadLivePids([THREAD_LIVE], env).size).toBe(0);
+      const table = new Map([[process.pid, { ppid: 1, tty: "??", comm: process.execPath }]]);
+      expect(codexThreadLivePid(THREAD_LIVE, env, table)).toBeNull();
+      expect(codexThreadLivePids([THREAD_LIVE], env, table).size).toBe(0);
     } finally {
       closeSync(fd);
     }
   });
+
+  test("an indexer holding the same rollout cannot hide a valid Codex holder", async () => {
+    const { env, live } = rolloutFixture();
+    const fd = openSync(live, "r");
+    const holder = await holdRolloutAsCodex(live);
+    try {
+      const first = codexRolloutHolderPids([THREAD_LIVE], env).get(THREAD_LIVE)!;
+      expect([process.pid, holder.pid]).toContain(first);
+      const valid = first === process.pid ? holder.pid : process.pid;
+      const table = new Map([
+        [first, { ppid: 1, tty: "??", comm: "/tools/indexer" }],
+        [valid, { ppid: 1, tty: "??", comm: "/tools/codex" }],
+      ]);
+      expect(codexThreadLivePid(THREAD_LIVE, env, table)).toBe(valid);
+      expect(codexThreadLivePids([THREAD_LIVE, THREAD_DEAD], env, table)).toEqual(new Map([[THREAD_LIVE, valid]]));
+    } finally {
+      closeSync(fd);
+      await holder.stop();
+    }
+  }, 30_000);
 });
 
 describe("codex-queue：持有者身份校验", () => {

@@ -126,12 +126,13 @@ export function codexThreadLivePids(
   /** 已解出的进程表；`ocs who` 传进来跟宿主解析共用一次 ps。 */
   table_?: ReadonlyMap<number, PsEntry>,
 ): Map<string, number> {
-  const holders = codexRolloutHolderPids(threadIds, env);
-  if (holders.size === 0) return holders;
+  const holders = codexRolloutHolders(threadIds, env);
+  if (holders.size === 0) return new Map();
   const table = table_ ?? psTable(env);
   const live = new Map<string, number>();
-  for (const [threadId, pid] of holders) {
-    if (isCodexRolloutHolder(pid, table)) live.set(threadId, pid);
+  for (const [threadId, pids] of holders) {
+    const pid = pids.find((candidate) => isCodexRolloutHolder(candidate, table));
+    if (pid !== undefined) live.set(threadId, pid);
   }
   return live;
 }
@@ -146,7 +147,14 @@ export function codexRolloutHolderPids(
   threadIds: readonly string[],
   env: NodeJS.ProcessEnv = process.env,
 ): Map<string, number> {
-  const live = new Map<string, number>();
+  return new Map([...codexRolloutHolders(threadIds, env)].map(([id, pids]) => [id, pids[0]!]));
+}
+
+function codexRolloutHolders(
+  threadIds: readonly string[],
+  env: NodeJS.ProcessEnv,
+): Map<string, number[]> {
+  const live = new Map<string, number[]>();
   // 目录树只走一次：codexRolloutPath 每次都要遍历整棵 sessions 树（本机 2500+ 文件），
   // 逐个 id 调用等于把它重复 N 遍。
   const wanted = new Set(threadIds.map((id) => id.toLowerCase()));
@@ -177,7 +185,12 @@ export function codexRolloutHolderPids(
       isReg = line.slice(1) === "REG";
     } else if (tag === "n" && pid !== null && isReg) {
       const id = byPath.get(line.slice(1));
-      if (id !== undefined && !live.has(id)) live.set(id, pid);
+      if (id !== undefined) {
+        // An indexer may appear before the owning Codex process.
+        const pids = live.get(id) ?? [];
+        if (!pids.includes(pid)) pids.push(pid);
+        live.set(id, pids);
+      }
     }
   }
   return live;
