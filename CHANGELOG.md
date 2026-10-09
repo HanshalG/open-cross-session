@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.4
+
+Reliable updates for Git-backed agent skills.
+
+- Skill refresh finds the Git checkout from the installed skill path instead of parsing the displayed update command. Checkouts whose paths include spaces or apostrophes now update correctly.
+- Printed Git update commands quote the checkout path, preserving literal shell characters.
+- Local edits remain protected by fast-forward-only Git updates. A removed skill link reports failure and leaves the former checkout untouched.
+
 ## 0.8.3
 
 Separate LAN conversations for Codex chats with colliding short IDs.

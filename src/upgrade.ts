@@ -163,8 +163,10 @@ export function detectSkillChannels(home: string = homedir()): SkillChannel[] {
       continue;
     }
     const root = gitRoot(real);
-    if (root !== null) found.push({ channel: "git-checkout", path: dir, update: `git -C ${root} pull --ff-only` });
-    else if (managed.has(dir)) found.push({ channel: "installer", path: dir, update: "ocs skill install" });
+    if (root !== null) {
+      const quoted = process.platform === "win32" ? root.replaceAll("'", "''") : root.replaceAll("'", "'\\''");
+      found.push({ channel: "git-checkout", path: dir, update: `git -C '${quoted}' pull --ff-only` });
+    } else if (managed.has(dir)) found.push({ channel: "installer", path: dir, update: "ocs skill install" });
     else found.push({ channel: "copied", path: dir, update: "npx skills update ocs" });
   }
   return found;
@@ -180,7 +182,11 @@ export function refreshSkills(channels: readonly SkillChannel[]): string[] {
         ? `skill (claude-plugin): updated — restart Claude Code or /reload-plugins`
         : `skill (claude-plugin): run \`${skill.update}\``);
     } else if (skill.channel === "git-checkout") {
-      const root = skill.update.split(" ")[2]!;
+      const root = gitRoot(skill.path);
+      if (root === null) {
+        lines.push(`skill (git-checkout ${skill.path}): not updated (Git checkout unavailable)`);
+        continue;
+      }
       const out = spawnSync("git", ["-C", root, "pull", "-q", "--ff-only"], { encoding: "utf8", windowsHide: true });
       lines.push(out.status === 0
         ? `skill (git-checkout ${skill.path}): updated`
