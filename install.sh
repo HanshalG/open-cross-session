@@ -27,9 +27,9 @@ curl -fsSL "$url" -o "$tmp/$asset.tar.gz"
 curl -fsSL "$url.sha256" -o "$tmp/$asset.tar.gz.sha256"
 expected=$(awk '{print $1}' "$tmp/$asset.tar.gz.sha256")
 if command -v shasum >/dev/null 2>&1; then
-  actual=$(shasum -a 256 "$tmp/$asset.tar.gz" | awk '{print $1}')
+  actual=$(LC_ALL=C shasum -a 256 "$tmp/$asset.tar.gz" | awk '{print $1}')
 elif command -v sha256sum >/dev/null 2>&1; then
-  actual=$(sha256sum "$tmp/$asset.tar.gz" | awk '{print $1}')
+  actual=$(LC_ALL=C sha256sum "$tmp/$asset.tar.gz" | awk '{print $1}')
 else
   echo "neither shasum nor sha256sum found; cannot verify download" >&2
   exit 1
@@ -39,7 +39,7 @@ if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
   exit 1
 fi
 
-tar -xzf "$tmp/$asset.tar.gz" -C "$tmp"
+LC_ALL=C tar -xzf "$tmp/$asset.tar.gz" -C "$tmp"
 chmod +x "$tmp/ocs"
 # 冒烟通过前不动现有安装；staging 放同一目录内，rename 才是原子的。
 "$tmp/ocs" help >/dev/null || { echo "downloaded binary failed smoke test" >&2; exit 1; }
