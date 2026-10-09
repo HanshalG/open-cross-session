@@ -111,9 +111,9 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/HanshalG/open-cross-session/main/install.ps1 | iex
 ```
 
-The current fork release provides a tested macOS Apple Silicon binary. Intel Mac,
-Linux, and Windows release assets are pending the GitHub Actions build. Those
-platforms can build from source.
+The fork's releases include macOS Apple Silicon, Intel Mac, Linux x64, and Windows
+x64 binaries built and smoke-tested on their native GitHub Actions runners. The
+full test suite also runs on both Mac architectures and Linux.
 
 Single static binary, zero runtime dependencies. macOS (arm64/x64), Linux (x64), and Windows (x64).
 The installer also registers the version-matched ocs skill for Claude Code,
@@ -419,7 +419,7 @@ Yes, on the same LAN. Run `ocs lan up` on both machines, pair them once with `oc
 
 ### Does it work on Windows?
 
-OCS supports Windows x64; this fork's downloadable Windows build is pending GitHub Actions. On Windows, OCS wakes Claude Code through its named-pipe inbox and Codex Desktop through its local IPC pipe, and joins the LAN mode.
+OCS supports Windows x64, with a downloadable binary built and smoke-tested on Windows. On Windows, OCS wakes Claude Code through its named-pipe inbox and Codex Desktop through its local IPC pipe, and joins the LAN mode.
 
 The Codex pipe name (`\\.\pipe\codex-ipc`) is fixed and any local process could create it first, so since 0.7.1 ocs checks who is serving the pipe on the very connection it is about to use: the pipe must be owned by your user, and its server process must run as you and be ChatGPT Desktop (Store package `OpenAI.Codex`, image inside the package's install directory). Otherwise nothing is sent, the message stays in the inbox, and `ocs doctor` prints the reason. A Desktop that is not the Store package, or that runs elevated, is refused too.
 

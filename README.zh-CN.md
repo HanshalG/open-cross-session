@@ -93,8 +93,9 @@ Windows（PowerShell）：
 irm https://raw.githubusercontent.com/HanshalG/open-cross-session/main/install.ps1 | iex
 ```
 
-此 fork 当前提供经过测试的 macOS Apple Silicon 二进制。Intel Mac、Linux 和 Windows
-发布文件等待 GitHub Actions 构建；这些平台可以从源码构建。
+此 fork 的发布文件包含 macOS Apple Silicon、Intel Mac、Linux x64 和 Windows x64
+二进制，均在对应平台的 GitHub Actions runner 上构建并完成冒烟测试。完整测试套件
+也会在两种 Mac 架构和 Linux 上运行。
 
 单文件静态二进制，运行时零依赖。支持 macOS（arm64/x64）、Linux（x64）和 Windows（x64）。安装器会给
 Claude Code、Codex、Pi 注册与二进制同版本的 ocs skill：有 `npx` 时调用固定版本的
@@ -336,7 +337,7 @@ Claude Code 自带的 cross-session 已经能让 Claude 和 Claude 互发消息�
 
 ### 支持 Windows 吗？
 
-OCS 支持 Windows x64；此 fork 的 Windows 发布文件等待 GitHub Actions 构建。Windows 上通过命名管道收件箱唤醒 Claude Code，通过本地 IPC 管道唤醒 Codex Desktop，也能加入局域网模式。
+OCS 支持 Windows x64，提供在 Windows 上构建并完成冒烟测试的二进制下载。Windows 上通过命名管道收件箱唤醒 Claude Code，通过本地 IPC 管道唤醒 Codex Desktop，也能加入局域网模式。
 
 Codex 的管道名（`\\.\pipe\codex-ipc`）是固定的，本机任何进程都可以抢先建出来。0.7.1 起 ocs 在即将使用的那条连接上核对管道的服务端：管道属主必须是你，服务端进程必须以你的身份运行，并且是 ChatGPT Desktop（Store 包 `OpenAI.Codex`，映像在包的安装目录里）。不满足就什么都不发，消息留在收件箱，`ocs doctor` 会写出原因。不是 Store 包的 Desktop、以管理员身份运行的 Desktop 也会被拒。
 
